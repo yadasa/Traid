@@ -11,6 +11,10 @@ load_dotenv()
 SUPPORTED_SYMBOLS = ("XAUUSD", "XAGUSD", "NAS100", "SPX500")
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     """Runtime configuration loaded from environment variables and an optional .env file."""
@@ -43,6 +47,23 @@ class Settings:
     mt5_password: str | None = os.getenv("MT5_PASSWORD")
     mt5_server: str | None = os.getenv("MT5_SERVER")
 
+    trading_enabled: bool = env_bool("TRAID_TRADING_ENABLED", False)
+    trading_mode: str = os.getenv("TRAID_TRADING_MODE", "paper").lower()
+    trading_api_key: str | None = os.getenv("TRAID_TRADING_API_KEY")
+    trading_magic: int = int(os.getenv("TRAID_TRADING_MAGIC", "260731"))
+    max_order_lots: float = float(os.getenv("TRAID_MAX_ORDER_LOTS", "1.0"))
+    max_open_positions: int = int(os.getenv("TRAID_MAX_OPEN_POSITIONS", "4"))
+    max_positions_per_symbol: int = int(
+        os.getenv("TRAID_MAX_POSITIONS_PER_SYMBOL", "1")
+    )
+    require_stop_loss: bool = env_bool("TRAID_REQUIRE_STOP_LOSS", True)
+    trailing_poll_seconds: float = float(
+        os.getenv("TRAID_TRAILING_POLL_SECONDS", "0.5")
+    )
+    trailing_state_path: str = os.getenv(
+        "TRAID_TRAILING_STATE_PATH", "data/trailing_stops.json"
+    )
+
     cors_origins: tuple[str, ...] = tuple(
         value.strip()
         for value in os.getenv("TRAID_CORS_ORIGINS", "*").split(",")
@@ -72,3 +93,17 @@ class Settings:
             raise ValueError("TRAID_QUOTE_POLL_SECONDS must be at least 0.1.")
         if self.bar_poll_seconds < 0.5:
             raise ValueError("TRAID_BAR_POLL_SECONDS must be at least 0.5.")
+        if self.trading_mode not in {"paper", "live"}:
+            raise ValueError("TRAID_TRADING_MODE must be 'paper' or 'live'.")
+        if self.trading_enabled and self.provider != "mt5":
+            raise ValueError("Live order execution currently requires TRAID_PROVIDER=mt5.")
+        if self.trading_enabled and not self.trading_api_key:
+            raise ValueError(
+                "TRAID_TRADING_API_KEY is required whenever trading is enabled."
+            )
+        if self.max_order_lots <= 0:
+            raise ValueError("TRAID_MAX_ORDER_LOTS must be positive.")
+        if self.max_open_positions < 1 or self.max_positions_per_symbol < 1:
+            raise ValueError("Trading position limits must be at least 1.")
+        if self.trailing_poll_seconds < 0.1:
+            raise ValueError("TRAID_TRAILING_POLL_SECONDS must be at least 0.1.")
