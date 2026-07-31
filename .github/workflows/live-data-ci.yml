@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - main
-      - feature/live-market-data
+      - "feature/**"
   pull_request:
     paths:
       - "traid_live/**"
+      - "dashboard/**"
       - "tests/test_live_data.py"
       - "requirements-live.txt"
       - ".github/workflows/live-data-ci.yml"
