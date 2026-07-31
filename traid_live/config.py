@@ -25,7 +25,13 @@ class Settings:
     default_timeframe: str = os.getenv("TRAID_TIMEFRAME", "5m")
     default_lookback: int = int(os.getenv("TRAID_LOOKBACK", "400"))
     default_pred_len: int = int(os.getenv("TRAID_PRED_LEN", "24"))
-    stream_poll_seconds: float = float(os.getenv("TRAID_STREAM_POLL_SECONDS", "5"))
+    quote_poll_seconds: float = float(
+        os.getenv(
+            "TRAID_QUOTE_POLL_SECONDS",
+            os.getenv("TRAID_STREAM_POLL_SECONDS", "0.5"),
+        )
+    )
+    bar_poll_seconds: float = float(os.getenv("TRAID_BAR_POLL_SECONDS", "2"))
 
     massive_api_key: str | None = os.getenv("MASSIVE_API_KEY")
     massive_base_url: str = os.getenv("MASSIVE_BASE_URL", "https://api.massive.com")
@@ -62,3 +68,7 @@ class Settings:
             raise ValueError("MASSIVE_API_KEY is required when TRAID_PROVIDER=massive.")
         if self.max_context < 2:
             raise ValueError("TRAID_MAX_CONTEXT must be at least 2.")
+        if self.quote_poll_seconds < 0.1:
+            raise ValueError("TRAID_QUOTE_POLL_SECONDS must be at least 0.1.")
+        if self.bar_poll_seconds < 0.5:
+            raise ValueError("TRAID_BAR_POLL_SECONDS must be at least 0.5.")
