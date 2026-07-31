@@ -59,7 +59,7 @@ Desktop.ini
 *.log
 logs/
 
-# Environment
+# Environment and local trading state
 .env
 .venv
 env/
@@ -67,6 +67,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+data/trailing_stops.json
 
 # Temporary files
 *.tmp
