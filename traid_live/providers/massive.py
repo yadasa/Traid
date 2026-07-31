@@ -8,11 +8,11 @@ import pandas as pd
 
 from ..config import Settings
 from ..market import INDEX_SYMBOLS, MASSIVE_SYMBOLS, get_timeframe, normalize_symbol
-from .base import CandleProvider, MarketDataError
+from .base import CandleProvider, MarketDataError, MarketQuote
 
 
 class MassiveProvider(CandleProvider):
-    """Cloud OHLC provider for spot metals and the NDX/SPX cash indices."""
+    """Cloud OHLC and snapshot provider for spot metals and cash indices."""
 
     name = "massive"
 
@@ -69,7 +69,14 @@ class MassiveProvider(CandleProvider):
             )
 
         frame = pd.DataFrame(results).rename(
-            columns={"t": "timestamp", "o": "open", "h": "high", "l": "low", "c": "close", "v": "volume"}
+            columns={
+                "t": "timestamp",
+                "o": "open",
+                "h": "high",
+                "l": "low",
+                "c": "close",
+                "v": "volume",
+            }
         )
         frame["timestamp"] = pd.to_datetime(frame["timestamp"], unit="ms", utc=True)
         if "volume" not in frame:
@@ -85,6 +92,73 @@ class MassiveProvider(CandleProvider):
             frame["timestamp"] + pd.Timedelta(seconds=tf.seconds) <= completed_before
         ]
         return self.normalize_frame(frame, limit)
+
+    def get_quote(self, symbol: str) -> MarketQuote:
+        canonical = normalize_symbol(symbol)
+        ticker = MASSIVE_SYMBOLS[canonical]
+        asset_type = "indices" if canonical in INDEX_SYMBOLS else "fx"
+        response = self.client.get(
+            f"{self.base_url}/v3/snapshot",
+            params={
+                "ticker": ticker,
+                "type": asset_type,
+                "limit": 1,
+                "apiKey": self.api_key,
+            },
+        )
+        if response.status_code >= 400:
+            raise MarketDataError(
+                f"Massive snapshot failed for {ticker}: HTTP {response.status_code} "
+                f"{response.text[:300]}"
+            )
+
+        payload = response.json()
+        results = payload.get("results") or []
+        if not results:
+            return super().get_quote(canonical)
+        result = results[0]
+        if result.get("error"):
+            raise MarketDataError(
+                f"Massive snapshot error for {ticker}: "
+                f"{result.get('message') or result.get('error')}"
+            )
+
+        last_quote = result.get("last_quote") or result.get("lastQuote") or {}
+        bid_raw = last_quote.get("bid_price", last_quote.get("bid"))
+        ask_raw = last_quote.get("ask_price", last_quote.get("ask"))
+        bid = float(bid_raw) if bid_raw is not None else None
+        ask = float(ask_raw) if ask_raw is not None else None
+
+        price_raw = result.get("value")
+        if price_raw is None and bid is not None and ask is not None:
+            price_raw = (bid + ask) / 2
+        if price_raw is None:
+            session = result.get("session") or {}
+            price_raw = session.get("close")
+        if price_raw is None:
+            return super().get_quote(canonical)
+
+        timestamp_raw = (
+            result.get("last_updated")
+            or last_quote.get("participant_timestamp")
+            or last_quote.get("sip_timestamp")
+        )
+        if timestamp_raw:
+            timestamp = pd.to_datetime(int(timestamp_raw), unit="ns", utc=True)
+        else:
+            timestamp = pd.Timestamp.now(tz="UTC")
+
+        timeframe = str(result.get("timeframe") or "").upper()
+        return MarketQuote(
+            symbol=canonical,
+            timestamp=timestamp,
+            price=float(price_raw),
+            bid=bid,
+            ask=ask,
+            spread=(ask - bid) if bid is not None and ask is not None else None,
+            delayed=timeframe != "REAL-TIME" if timeframe else None,
+            source=f"massive:{ticker}",
+        )
 
     def future_timestamps(
         self,
