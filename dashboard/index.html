@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Traid Live Forecast</title>
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #090b10; color: #f4f7fb; }
+    header { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; padding: 18px 20px; border-bottom: 1px solid #232936; }
+    label { display: grid; gap: 6px; color: #aab3c5; font-size: 12px; }
+    input, select, button { border: 1px solid #323b4c; border-radius: 8px; background: #121722; color: #f4f7fb; padding: 10px 12px; }
+    input { min-width: 240px; }
+    button { cursor: pointer; background: #2f6fed; border-color: #2f6fed; font-weight: 700; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { margin-left: auto; color: #9ca8bc; font-size: 13px; }
+    #chart { width: 100%; height: calc(100vh - 126px); min-height: 520px; }
+    footer { position: fixed; left: 18px; bottom: 12px; z-index: 2; padding: 8px 10px; border-radius: 8px; background: rgba(9,11,16,.8); color: #9ca8bc; font-size: 12px; pointer-events: none; }
+    @media (max-width: 780px) { #status { width: 100%; margin-left: 0; } input { min-width: 190px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <label>API URL<input id="apiUrl" value="http://localhost:8000" /></label>
+    <label>Market
+      <select id="symbol">
+        <option>XAUUSD</option><option>XAGUSD</option><option>NAS100</option><option>SPX500</option>
+      </select>
+    </label>
+    <label>Timeframe
+      <select id="timeframe">
+        <option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option><option>1d</option>
+      </select>
+    </label>
+    <label>Projected bars<input id="predLen" type="number" value="24" min="1" max="512" style="min-width:110px" /></label>
+    <button id="load">Load forecast</button>
+    <div id="status">Idle</div>
+  </header>
+  <main id="chart"></main>
+  <footer>Solid candles: completed market data · Blue candles: Kronos projection</footer>
+
+  <script>
+    const container = document.getElementById('chart');
+    const statusEl = document.getElementById('status');
+    const loadButton = document.getElementById('load');
+    let socket;
+
+    const chart = LightweightCharts.createChart(container, {
+      autoSize: true,
+      layout: { background: { type: 'solid', color: '#090b10' }, textColor: '#aab3c5' },
+      grid: { vertLines: { color: '#171d29' }, horzLines: { color: '#171d29' } },
+      rightPriceScale: { borderColor: '#2a3242' },
+      timeScale: { borderColor: '#2a3242', timeVisible: true, secondsVisible: false },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    });
+
+    const historySeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: '#22c55e', downColor: '#ef4444', borderVisible: false,
+      wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+    });
+    const projectionSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: '#60a5fa', downColor: '#2563eb', borderVisible: false,
+      wickUpColor: '#93c5fd', wickDownColor: '#60a5fa', priceLineVisible: false,
+    });
+
+    const toCandle = row => ({
+      time: Math.floor(new Date(row.timestamp).getTime() / 1000),
+      open: Number(row.open), high: Number(row.high), low: Number(row.low), close: Number(row.close),
+    });
+
+    function wsBase(httpUrl) {
+      const url = new URL(httpUrl);
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      return url.toString().replace(/\/$/, '');
+    }
+
+    async function loadForecast() {
+      loadButton.disabled = true;
+      if (socket) socket.close();
+      const api = document.getElementById('apiUrl').value.replace(/\/$/, '');
+      const symbol = document.getElementById('symbol').value;
+      const timeframe = document.getElementById('timeframe').value;
+      const predLen = Number(document.getElementById('predLen').value);
+      statusEl.textContent = 'Loading model and candles…';
+
+      try {
+        const response = await fetch(`${api}/v1/forecast`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, timeframe, lookback: 400, pred_len: predLen, sample_count: 5 }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Forecast request failed');
+
+        historySeries.setData(payload.history.map(toCandle));
+        projectionSeries.setData(payload.projection.map(toCandle));
+        chart.timeScale().fitContent();
+        statusEl.textContent = `${payload.provider} · ${payload.model} · live on completed bars`;
+
+        socket = new WebSocket(`${wsBase(api)}/v1/stream/${symbol}?timeframe=${timeframe}&with_forecast=true&pred_len=${predLen}`);
+        socket.onmessage = event => {
+          const message = JSON.parse(event.data);
+          if (message.type === 'completed_candle') {
+            historySeries.update(toCandle(message.data));
+            if (message.projection) projectionSeries.setData(message.projection.map(toCandle));
+            statusEl.textContent = `Updated ${new Date(message.data.timestamp).toLocaleString()}`;
+          } else if (message.type === 'error') {
+            statusEl.textContent = message.detail;
+          }
+        };
+        socket.onclose = () => { statusEl.textContent = 'Live stream disconnected'; };
+      } catch (error) {
+        statusEl.textContent = error.message;
+      } finally {
+        loadButton.disabled = false;
+      }
+    }
+
+    loadButton.addEventListener('click', loadForecast);
+    document.getElementById('symbol').addEventListener('change', loadForecast);
+    document.getElementById('timeframe').addEventListener('change', loadForecast);
+  </script>
+</body>
+</html>
