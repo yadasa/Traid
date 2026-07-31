@@ -3,124 +3,771 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Traid Live Forecast</title>
+  <meta name="color-scheme" content="dark" />
+  <title>Traid — Live AI Market Terminal</title>
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    :root {
+      color-scheme: dark;
+      --bg: #050713;
+      --surface: rgba(11, 16, 35, 0.82);
+      --surface-strong: #0b1023;
+      --surface-soft: #10172e;
+      --line: rgba(135, 155, 210, 0.14);
+      --line-strong: rgba(135, 155, 210, 0.24);
+      --text: #f7f8ff;
+      --muted: #8590ad;
+      --blue: #3b82f6;
+      --blue-bright: #60a5fa;
+      --purple: #8b5cf6;
+      --purple-bright: #a78bfa;
+      --cyan: #22d3ee;
+      --green: #2dd4bf;
+      --red: #fb7185;
+      --amber: #fbbf24;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
     * { box-sizing: border-box; }
-    body { margin: 0; background: #090b10; color: #f4f7fb; }
-    header { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; padding: 18px 20px; border-bottom: 1px solid #232936; }
-    label { display: grid; gap: 6px; color: #aab3c5; font-size: 12px; }
-    input, select, button { border: 1px solid #323b4c; border-radius: 8px; background: #121722; color: #f4f7fb; padding: 10px 12px; }
-    input { min-width: 240px; }
-    button { cursor: pointer; background: #2f6fed; border-color: #2f6fed; font-weight: 700; }
-    button:disabled { opacity: .55; cursor: wait; }
-    #status { margin-left: auto; color: #9ca8bc; font-size: 13px; }
-    #chart { width: 100%; height: calc(100vh - 126px); min-height: 520px; }
-    footer { position: fixed; left: 18px; bottom: 12px; z-index: 2; padding: 8px 10px; border-radius: 8px; background: rgba(9,11,16,.8); color: #9ca8bc; font-size: 12px; pointer-events: none; }
-    @media (max-width: 780px) { #status { width: 100%; margin-left: 0; } input { min-width: 190px; } }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 15% -10%, rgba(59, 130, 246, 0.18), transparent 34%),
+        radial-gradient(circle at 95% 5%, rgba(139, 92, 246, 0.16), transparent 32%),
+        var(--bg);
+    }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+
+    .shell {
+      height: 100%;
+      display: grid;
+      grid-template-rows: 68px minmax(0, 1fr);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 7, 19, 0.72);
+      backdrop-filter: blur(24px);
+      z-index: 20;
+    }
+
+    .brand { display: flex; align-items: center; gap: 11px; min-width: 138px; }
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, var(--blue), var(--purple));
+      box-shadow: 0 0 28px rgba(91, 92, 246, 0.42);
+      font-weight: 900;
+      letter-spacing: -0.08em;
+    }
+    .brand-copy strong { display: block; font-size: 14px; letter-spacing: 0.14em; }
+    .brand-copy span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; }
+
+    .market-head { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .market-title { display: grid; gap: 2px; }
+    .market-title strong { font-size: 15px; }
+    .market-title small { color: var(--muted); }
+    .live-dot { width: 7px; height: 7px; border-radius: 99px; background: var(--green); box-shadow: 0 0 12px var(--green); }
+
+    .price-cluster { display: flex; align-items: baseline; gap: 9px; }
+    .live-price { font-size: 23px; font-weight: 760; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+    .price-change { font-size: 12px; font-weight: 700; color: var(--muted); }
+    .price-change.up { color: var(--green); }
+    .price-change.down { color: var(--red); }
+
+    .top-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 29px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(13, 19, 42, 0.72);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .badge.live { color: #b7f7e8; border-color: rgba(45, 212, 191, 0.25); background: rgba(45, 212, 191, 0.08); }
+    .badge.paper { color: #dbeafe; border-color: rgba(96, 165, 250, 0.26); background: rgba(59, 130, 246, 0.09); }
+    .badge.live-trading { color: #fee2e2; border-color: rgba(251, 113, 133, 0.28); background: rgba(251, 113, 133, 0.09); }
+
+    .icon-button, .ghost-button, .primary-button, .danger-button {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(16, 23, 46, 0.8);
+      cursor: pointer;
+      transition: 160ms ease;
+    }
+    .icon-button { width: 36px; height: 36px; display: grid; place-items: center; }
+    .icon-button:hover, .ghost-button:hover { border-color: rgba(96, 165, 250, 0.45); transform: translateY(-1px); }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    .main-column { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(420px, 1fr) 205px; gap: 12px; }
+    .panel {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(13, 19, 42, 0.91), rgba(7, 11, 27, 0.91));
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(96, 165, 250, 0.34), rgba(167, 139, 250, 0.28), transparent);
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    .chart-toolbar {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .segmented { display: inline-flex; gap: 3px; padding: 3px; border-radius: 10px; background: rgba(5, 8, 22, 0.7); border: 1px solid var(--line); }
+    .segmented button {
+      min-width: 42px;
+      height: 30px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .segmented button.active { color: white; background: linear-gradient(135deg, rgba(59, 130, 246, .88), rgba(91, 92, 246, .76)); box-shadow: 0 5px 16px rgba(59, 130, 246, .2); }
+
+    .control-select, .control-input {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(7, 11, 27, 0.78);
+      color: var(--text);
+      padding: 0 10px;
+      outline: none;
+    }
+    .control-select:focus, .control-input:focus { border-color: rgba(96, 165, 250, .56); box-shadow: 0 0 0 3px rgba(59, 130, 246, .1); }
+    .symbol-select { min-width: 115px; font-weight: 750; }
+    .chart-meta { margin-left: auto; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 11px; }
+    .legend { display: inline-flex; gap: 11px; align-items: center; }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .legend-swatch { width: 14px; height: 3px; border-radius: 10px; }
+    .legend-swatch.market { background: var(--green); }
+    .legend-swatch.live { background: var(--cyan); }
+    .legend-swatch.ai { background: linear-gradient(90deg, var(--blue), var(--purple)); }
+
+    #chart { width: 100%; height: calc(100% - 54px); }
+    .projection-label {
+      position: absolute;
+      top: 67px;
+      right: 18px;
+      z-index: 5;
+      padding: 7px 10px;
+      border: 1px solid rgba(167, 139, 250, .24);
+      border-radius: 9px;
+      color: #ddd6fe;
+      background: rgba(76, 29, 149, .15);
+      backdrop-filter: blur(12px);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    .positions-panel { display: grid; grid-template-rows: 48px minmax(0, 1fr); }
+    .section-head { display: flex; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--line); }
+    .section-head h2 { margin: 0; font-size: 13px; }
+    .section-head span { margin-left: 8px; color: var(--muted); font-size: 11px; }
+    .section-head button { margin-left: auto; }
+    .positions-table { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+    th { position: sticky; top: 0; z-index: 2; height: 34px; text-align: left; color: var(--muted); background: #0b1023; font-weight: 700; }
+    th, td { padding: 0 12px; border-bottom: 1px solid rgba(135,155,210,.08); white-space: nowrap; }
+    td { height: 42px; }
+    .side-pill { display: inline-flex; min-width: 42px; justify-content: center; padding: 4px 7px; border-radius: 6px; font-weight: 850; font-size: 9px; text-transform: uppercase; }
+    .side-pill.buy { color: #b7f7e8; background: rgba(45,212,191,.1); }
+    .side-pill.sell { color: #fecdd3; background: rgba(251,113,133,.1); }
+    .profit-positive { color: var(--green); }
+    .profit-negative { color: var(--red); }
+    .mini-button { height: 26px; border: 1px solid var(--line); border-radius: 7px; background: rgba(16,23,46,.8); color: var(--muted); cursor: pointer; font-size: 10px; }
+    .mini-button:hover { color: white; border-color: rgba(96,165,250,.4); }
+    .empty-state { display: grid; place-items: center; height: 100%; color: var(--muted); font-size: 12px; }
+
+    .side-column { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 12px; }
+    .account-card { padding: 15px; }
+    .account-top { display: flex; align-items: center; justify-content: space-between; }
+    .account-title { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; }
+    .account-equity { margin-top: 8px; font-size: 27px; font-weight: 780; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+    .account-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 13px; }
+    .metric { padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(5,8,22,.48); }
+    .metric span { display: block; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+    .metric strong { display: block; margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+    .trade-panel { display: grid; grid-template-rows: 51px minmax(0, 1fr) auto; }
+    .trade-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 7px; border-bottom: 1px solid var(--line); }
+    .trade-tabs button { border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; font-weight: 850; font-size: 12px; }
+    .trade-tabs button.buy.active { color: #d5fff6; background: linear-gradient(135deg, rgba(13,148,136,.36), rgba(45,212,191,.14)); box-shadow: inset 0 0 0 1px rgba(45,212,191,.22); }
+    .trade-tabs button.sell.active { color: #ffe4e6; background: linear-gradient(135deg, rgba(225,29,72,.32), rgba(251,113,133,.13)); box-shadow: inset 0 0 0 1px rgba(251,113,133,.22); }
+    .trade-form { overflow: auto; padding: 14px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .field { display: grid; gap: 6px; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .field input { width: 100%; height: 38px; border: 1px solid var(--line); border-radius: 9px; background: rgba(5,8,22,.62); color: white; padding: 0 10px; outline: none; font-variant-numeric: tabular-nums; }
+    .field input:focus { border-color: rgba(96,165,250,.55); box-shadow: 0 0 0 3px rgba(59,130,246,.1); }
+    .input-unit { position: relative; }
+    .input-unit input { padding-right: 46px; }
+    .input-unit span { position: absolute; top: 50%; right: 9px; transform: translateY(-50%); color: var(--muted); font-size: 9px; }
+    .divider { grid-column: 1 / -1; height: 1px; margin: 3px 0; background: var(--line); }
+    .subheading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; color: #c8d2ee; font-size: 11px; font-weight: 800; }
+    .subheading small { color: var(--muted); font-weight: 500; }
+    .checkbox-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+    .checkbox-row input { accent-color: var(--purple); }
+    .security-note { grid-column: 1 / -1; padding: 10px; border: 1px solid rgba(96,165,250,.14); border-radius: 9px; background: rgba(59,130,246,.055); color: var(--muted); font-size: 9px; line-height: 1.55; }
+
+    .trade-footer { padding: 12px 14px 14px; border-top: 1px solid var(--line); background: rgba(5,8,22,.4); }
+    .order-summary { display: flex; justify-content: space-between; margin-bottom: 9px; color: var(--muted); font-size: 10px; }
+    .primary-button, .danger-button { width: 100%; height: 43px; border: 0; font-weight: 850; }
+    .primary-button { background: linear-gradient(135deg, var(--blue), var(--purple)); box-shadow: 0 12px 28px rgba(59,130,246,.22); }
+    .primary-button.buy { background: linear-gradient(135deg, #0f9f91, #2563eb); }
+    .primary-button.sell { background: linear-gradient(135deg, #e11d48, #7c3aed); }
+    .primary-button:hover { transform: translateY(-1px); filter: brightness(1.07); }
+    .primary-button:disabled { opacity: .46; cursor: wait; transform: none; }
+
+    .settings-drawer {
+      position: fixed;
+      top: 78px;
+      right: 14px;
+      z-index: 50;
+      width: 330px;
+      padding: 16px;
+      border: 1px solid var(--line-strong);
+      border-radius: 15px;
+      background: rgba(8, 12, 28, .95);
+      backdrop-filter: blur(24px);
+      box-shadow: var(--shadow);
+      transform: translateX(calc(100% + 30px));
+      opacity: 0;
+      transition: 180ms ease;
+    }
+    .settings-drawer.open { transform: translateX(0); opacity: 1; }
+    .settings-drawer h3 { margin: 0 0 14px; font-size: 13px; }
+    .settings-drawer .field { margin-top: 10px; }
+    .settings-drawer .ghost-button { width: 100%; height: 38px; margin-top: 14px; }
+
+    .toast-stack { position: fixed; right: 18px; bottom: 18px; z-index: 80; display: grid; gap: 8px; }
+    .toast { min-width: 260px; max-width: 380px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 11px; background: rgba(10,15,34,.96); box-shadow: var(--shadow); font-size: 11px; animation: toast-in .18s ease; }
+    .toast.success { border-color: rgba(45,212,191,.3); }
+    .toast.error { border-color: rgba(251,113,133,.34); }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+    @media (max-width: 1100px) {
+      body { overflow: auto; }
+      .shell { min-height: 100%; height: auto; }
+      .workspace { grid-template-columns: 1fr; }
+      .main-column { min-height: 780px; }
+      .side-column { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
+    }
+    @media (max-width: 720px) {
+      .topbar { padding: 0 12px; }
+      .brand-copy, .market-title, .top-actions .badge:nth-child(1), .chart-meta .legend { display: none; }
+      .workspace { padding: 8px; gap: 8px; }
+      .main-column { min-height: 730px; grid-template-rows: 500px 220px; }
+      .side-column { grid-template-columns: 1fr; }
+      .chart-toolbar { overflow-x: auto; }
+      .form-grid { grid-template-columns: 1fr; }
+      .field.full, .divider, .subheading, .checkbox-row, .security-note { grid-column: 1; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <label>API URL<input id="apiUrl" value="http://localhost:8000" /></label>
-    <label>Market
-      <select id="symbol">
-        <option>XAUUSD</option><option>XAGUSD</option><option>NAS100</option><option>SPX500</option>
-      </select>
-    </label>
-    <label>Timeframe
-      <select id="timeframe">
-        <option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option><option>1d</option>
-      </select>
-    </label>
-    <label>Projected bars<input id="predLen" type="number" value="24" min="1" max="512" style="min-width:110px" /></label>
-    <button id="load">Load forecast</button>
-    <div id="status">Idle</div>
-  </header>
-  <main id="chart"></main>
-  <footer>Solid candles: completed market data · Blue candles: Kronos projection</footer>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">T</div>
+        <div class="brand-copy"><strong>TRAID</strong><span>AI market terminal</span></div>
+      </div>
+      <div class="market-head">
+        <span class="live-dot" id="liveDot"></span>
+        <div class="market-title"><strong id="marketName">Gold / U.S. Dollar</strong><small id="marketProvider">Connecting…</small></div>
+        <div class="price-cluster">
+          <span class="live-price" id="livePrice">—</span>
+          <span class="price-change" id="priceChange">—</span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="badge live" id="connectionBadge">● LIVE FEED</span>
+        <span class="badge paper" id="modeBadge">TRADING LOCKED</span>
+        <button class="icon-button" id="settingsButton" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="main-column">
+        <article class="panel chart-panel">
+          <div class="chart-toolbar">
+            <select class="control-select symbol-select" id="symbol">
+              <option value="XAUUSD">XAUUSD</option>
+              <option value="XAGUSD">XAGUSD</option>
+              <option value="NAS100">NAS100</option>
+              <option value="SPX500">SPX500</option>
+            </select>
+            <div class="segmented" id="timeframes">
+              <button data-value="1m">1m</button>
+              <button data-value="5m" class="active">5m</button>
+              <button data-value="15m">15m</button>
+              <button data-value="30m">30m</button>
+              <button data-value="1h">1H</button>
+              <button data-value="4h">4H</button>
+              <button data-value="1d">1D</button>
+            </div>
+            <div class="chart-meta">
+              <div class="legend">
+                <span class="legend-item"><i class="legend-swatch market"></i>Market</span>
+                <span class="legend-item"><i class="legend-swatch live"></i>Active candle</span>
+                <span class="legend-item"><i class="legend-swatch ai"></i>Kronos projection</span>
+              </div>
+              <span id="forecastAge">Forecast pending</span>
+            </div>
+          </div>
+          <div class="projection-label">AI Projection · OHLCV</div>
+          <div id="chart"></div>
+        </article>
+
+        <article class="panel positions-panel">
+          <div class="section-head">
+            <h2>Open positions</h2><span id="positionCount">0 positions</span>
+            <button class="mini-button" id="refreshPositions">Refresh</button>
+          </div>
+          <div class="positions-table" id="positionsContainer">
+            <div class="empty-state">Connect a protected MT5 trading session to view positions.</div>
+          </div>
+        </article>
+      </section>
+
+      <aside class="side-column">
+        <article class="panel account-card">
+          <div class="account-top"><span class="account-title">Account equity</span><span class="badge" id="accountServer">Not connected</span></div>
+          <div class="account-equity" id="accountEquity">—</div>
+          <div class="account-grid">
+            <div class="metric"><span>Balance</span><strong id="accountBalance">—</strong></div>
+            <div class="metric"><span>Free margin</span><strong id="accountMargin">—</strong></div>
+            <div class="metric"><span>Bid</span><strong id="bidPrice">—</strong></div>
+            <div class="metric"><span>Ask</span><strong id="askPrice">—</strong></div>
+          </div>
+        </article>
+
+        <article class="panel trade-panel">
+          <div class="trade-tabs">
+            <button class="buy active" data-side="buy">Buy / Long</button>
+            <button class="sell" data-side="sell">Sell / Short</button>
+          </div>
+          <div class="trade-form">
+            <div class="form-grid">
+              <div class="field full">
+                <label>Order volume</label>
+                <div class="input-unit"><input id="volume" type="number" min="0.01" step="0.01" value="0.01" /><span>lots</span></div>
+              </div>
+              <div class="field">
+                <label>Stop loss distance</label>
+                <div class="input-unit"><input id="stopLoss" type="number" min="0.00001" step="0.1" value="5" /><span>price</span></div>
+              </div>
+              <div class="field">
+                <label>Take profit distance</label>
+                <div class="input-unit"><input id="takeProfit" type="number" min="0" step="0.1" value="10" /><span>price</span></div>
+              </div>
+              <div class="divider"></div>
+              <div class="subheading"><span>Dynamic trailing stop</span><small>Optional</small></div>
+              <div class="field">
+                <label>Trail distance</label>
+                <div class="input-unit"><input id="trailDistance" type="number" min="0" step="0.1" value="3" /><span>price</span></div>
+              </div>
+              <div class="field">
+                <label>Activation profit</label>
+                <div class="input-unit"><input id="trailActivation" type="number" min="0" step="0.1" value="3" /><span>price</span></div>
+              </div>
+              <div class="field full">
+                <label>Minimum trail step</label>
+                <div class="input-unit"><input id="trailStep" type="number" min="0" step="0.1" value="0.5" /><span>price</span></div>
+              </div>
+              <label class="checkbox-row"><input type="checkbox" id="confirmLive" /> I understand this submits a real order when live mode is enabled.</label>
+              <div class="security-note">Your MT5 login and password stay in the server-side <strong>.env</strong>. This browser sends only a protected API key and order parameters. Test on a demo account before enabling live mode.</div>
+            </div>
+          </div>
+          <div class="trade-footer">
+            <div class="order-summary"><span id="orderModeText">Trading connection required</span><span id="spreadText">Spread —</span></div>
+            <button class="primary-button buy" id="placeOrder">Connect trading to place order</button>
+          </div>
+        </article>
+      </aside>
+    </main>
+  </div>
+
+  <aside class="settings-drawer" id="settingsDrawer">
+    <h3>Terminal connection</h3>
+    <div class="field"><label>API URL</label><input id="apiUrl" value="http://localhost:8000" /></div>
+    <div class="field"><label>Trading API key</label><input id="tradingKey" type="password" autocomplete="off" placeholder="X-Traid-Key" /></div>
+    <div class="field"><label>Projected candles</label><input id="predLen" type="number" min="1" max="512" value="24" /></div>
+    <button class="ghost-button" id="saveSettings">Save & reconnect</button>
+  </aside>
+  <div class="toast-stack" id="toastStack"></div>
 
   <script>
-    const container = document.getElementById('chart');
-    const statusEl = document.getElementById('status');
-    const loadButton = document.getElementById('load');
-    let socket;
+    const $ = id => document.getElementById(id);
+    const state = {
+      timeframe: '5m',
+      side: 'buy',
+      socket: null,
+      quote: null,
+      firstClose: null,
+      lastClose: null,
+      priceLine: null,
+      tradingStatus: null,
+      positions: [],
+    };
 
-    const chart = LightweightCharts.createChart(container, {
+    const names = {
+      XAUUSD: 'Gold / U.S. Dollar',
+      XAGUSD: 'Silver / U.S. Dollar',
+      NAS100: 'Nasdaq 100 CFD',
+      SPX500: 'S&P 500 CFD',
+    };
+
+    const chart = LightweightCharts.createChart($('chart'), {
       autoSize: true,
-      layout: { background: { type: 'solid', color: '#090b10' }, textColor: '#aab3c5' },
-      grid: { vertLines: { color: '#171d29' }, horzLines: { color: '#171d29' } },
-      rightPriceScale: { borderColor: '#2a3242' },
-      timeScale: { borderColor: '#2a3242', timeVisible: true, secondsVisible: false },
-      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      layout: { background: { type: 'solid', color: '#070b1b' }, textColor: '#7f8aa8', attributionLogo: false },
+      grid: { vertLines: { color: 'rgba(135,155,210,.055)' }, horzLines: { color: 'rgba(135,155,210,.055)' } },
+      rightPriceScale: { borderColor: 'rgba(135,155,210,.13)', scaleMargins: { top: .08, bottom: .22 } },
+      timeScale: { borderColor: 'rgba(135,155,210,.13)', timeVisible: true, secondsVisible: false, rightOffset: 8, barSpacing: 8 },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal, vertLine: { color: 'rgba(96,165,250,.3)' }, horzLine: { color: 'rgba(96,165,250,.3)' } },
+      handleScroll: true,
+      handleScale: true,
     });
 
-    const historySeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
-      upColor: '#22c55e', downColor: '#ef4444', borderVisible: false,
-      wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+    const marketSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: '#2dd4bf', downColor: '#fb7185', borderVisible: false,
+      wickUpColor: '#2dd4bf', wickDownColor: '#fb7185', priceLineVisible: false,
+    });
+    const activeSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: '#22d3ee', downColor: '#38bdf8', borderVisible: false,
+      wickUpColor: '#67e8f9', wickDownColor: '#7dd3fc', priceLineVisible: false, lastValueVisible: false,
     });
     const projectionSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
-      upColor: '#60a5fa', downColor: '#2563eb', borderVisible: false,
-      wickUpColor: '#93c5fd', wickDownColor: '#60a5fa', priceLineVisible: false,
+      upColor: 'rgba(96,165,250,.88)', downColor: 'rgba(139,92,246,.88)',
+      borderUpColor: '#93c5fd', borderDownColor: '#a78bfa',
+      wickUpColor: '#60a5fa', wickDownColor: '#8b5cf6',
+      priceLineVisible: false, lastValueVisible: false,
     });
-
-    const toCandle = row => ({
-      time: Math.floor(new Date(row.timestamp).getTime() / 1000),
-      open: Number(row.open), high: Number(row.high), low: Number(row.low), close: Number(row.close),
+    const marketVolume = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceScaleId: 'volume', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
     });
+    const projectionVolume = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceScaleId: 'volume', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });
+    chart.priceScale('volume').applyOptions({ scaleMargins: { top: .84, bottom: 0 }, borderVisible: false });
 
-    function wsBase(httpUrl) {
-      const url = new URL(httpUrl);
+    const apiBase = () => $('apiUrl').value.trim().replace(/\/$/, '');
+    const tradingHeaders = () => ({ 'Content-Type': 'application/json', 'X-Traid-Key': $('tradingKey').value.trim() });
+    const toTime = value => Math.floor(new Date(value).getTime() / 1000);
+    const toCandle = row => ({ time: toTime(row.timestamp), open: +row.open, high: +row.high, low: +row.low, close: +row.close });
+    const toVolume = (row, projected = false) => ({
+      time: toTime(row.timestamp),
+      value: Math.max(0, +(row.volume || 0)),
+      color: projected ? 'rgba(139,92,246,.32)' : (+row.close >= +row.open ? 'rgba(45,212,191,.24)' : 'rgba(251,113,133,.22)'),
+    });
+    const number = (value, digits = 2) => value == null || Number.isNaN(+value) ? '—' : Number(value).toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+    const money = (value, currency = 'USD') => value == null ? '—' : new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
+
+    function toast(message, kind = '') {
+      const node = document.createElement('div');
+      node.className = `toast ${kind}`;
+      node.textContent = message;
+      $('toastStack').appendChild(node);
+      setTimeout(() => node.remove(), 4200);
+    }
+
+    function setConnection(connected, detail = '') {
+      $('liveDot').style.background = connected ? 'var(--green)' : 'var(--red)';
+      $('liveDot').style.boxShadow = connected ? '0 0 12px var(--green)' : '0 0 12px var(--red)';
+      $('connectionBadge').textContent = connected ? '● LIVE FEED' : '● DISCONNECTED';
+      $('connectionBadge').className = connected ? 'badge live' : 'badge live-trading';
+      if (detail) $('marketProvider').textContent = detail;
+    }
+
+    function updateQuote(quote) {
+      if (!quote) return;
+      state.quote = quote;
+      $('livePrice').textContent = number(quote.price, quote.price > 1000 ? 2 : 4);
+      $('bidPrice').textContent = number(quote.bid, quote.price > 1000 ? 2 : 4);
+      $('askPrice').textContent = number(quote.ask, quote.price > 1000 ? 2 : 4);
+      $('spreadText').textContent = quote.spread == null ? 'Spread —' : `Spread ${number(quote.spread, 5)}`;
+      if (state.firstClose != null) {
+        const change = quote.price - state.firstClose;
+        const pct = state.firstClose ? change / state.firstClose * 100 : 0;
+        $('priceChange').textContent = `${change >= 0 ? '+' : ''}${number(change, 2)} (${pct >= 0 ? '+' : ''}${number(pct, 2)}%)`;
+        $('priceChange').className = `price-change ${change >= 0 ? 'up' : 'down'}`;
+      }
+      if (!state.priceLine) {
+        state.priceLine = marketSeries.createPriceLine({ price: +quote.price, color: '#22d3ee', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: 'LIVE' });
+      } else {
+        state.priceLine.applyOptions({ price: +quote.price });
+      }
+      $('marketProvider').textContent = `${quote.source || 'market feed'}${quote.delayed ? ' · delayed' : ' · real time'}`;
+    }
+
+    function setProjection(rows) {
+      projectionSeries.setData(rows.map(toCandle));
+      projectionVolume.setData(rows.map(row => toVolume(row, true)));
+      $('forecastAge').textContent = `Projected ${rows.length} candles`;
+    }
+
+    function setHistory(rows) {
+      marketSeries.setData(rows.map(toCandle));
+      marketVolume.setData(rows.map(row => toVolume(row, false)));
+      state.firstClose = rows.length ? +rows[0].close : null;
+      state.lastClose = rows.length ? +rows[rows.length - 1].close : null;
+    }
+
+    function updateCurrent(row) {
+      if (!row) return;
+      activeSeries.setData([toCandle(row)]);
+      marketVolume.update(toVolume(row, false));
+    }
+
+    function wsBase() {
+      const url = new URL(apiBase());
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       return url.toString().replace(/\/$/, '');
     }
 
-    async function loadForecast() {
-      loadButton.disabled = true;
-      if (socket) socket.close();
-      const api = document.getElementById('apiUrl').value.replace(/\/$/, '');
-      const symbol = document.getElementById('symbol').value;
-      const timeframe = document.getElementById('timeframe').value;
-      const predLen = Number(document.getElementById('predLen').value);
-      statusEl.textContent = 'Loading model and candles…';
-
+    async function loadMarket() {
+      if (state.socket) state.socket.close();
+      const symbol = $('symbol').value;
+      const predLen = Math.max(1, Number($('predLen').value || 24));
+      $('marketName').textContent = names[symbol];
+      $('forecastAge').textContent = 'Generating forecast…';
+      setConnection(false, 'Loading candles and Kronos model…');
       try {
-        const response = await fetch(`${api}/v1/forecast`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, timeframe, lookback: 400, pred_len: predLen, sample_count: 5 }),
+        const response = await fetch(`${apiBase()}/v1/forecast`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, timeframe: state.timeframe, lookback: 400, pred_len: predLen, sample_count: 5 }),
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail || 'Forecast request failed');
-
-        historySeries.setData(payload.history.map(toCandle));
-        projectionSeries.setData(payload.projection.map(toCandle));
+        setHistory(payload.history);
+        activeSeries.setData([]);
+        updateCurrent(payload.current_candle);
+        setProjection(payload.projection);
+        updateQuote(payload.quote);
         chart.timeScale().fitContent();
-        statusEl.textContent = `${payload.provider} · ${payload.model} · live on completed bars`;
-
-        socket = new WebSocket(`${wsBase(api)}/v1/stream/${symbol}?timeframe=${timeframe}&with_forecast=true&pred_len=${predLen}`);
-        socket.onmessage = event => {
-          const message = JSON.parse(event.data);
-          if (message.type === 'completed_candle') {
-            historySeries.update(toCandle(message.data));
-            if (message.projection) projectionSeries.setData(message.projection.map(toCandle));
-            statusEl.textContent = `Updated ${new Date(message.data.timestamp).toLocaleString()}`;
-          } else if (message.type === 'error') {
-            statusEl.textContent = message.detail;
-          }
-        };
-        socket.onclose = () => { statusEl.textContent = 'Live stream disconnected'; };
+        connectStream(symbol, predLen);
       } catch (error) {
-        statusEl.textContent = error.message;
-      } finally {
-        loadButton.disabled = false;
+        setConnection(false, error.message);
+        toast(error.message, 'error');
       }
     }
 
-    loadButton.addEventListener('click', loadForecast);
-    document.getElementById('symbol').addEventListener('change', loadForecast);
-    document.getElementById('timeframe').addEventListener('change', loadForecast);
+    function connectStream(symbol, predLen) {
+      const socket = new WebSocket(`${wsBase()}/v1/stream/${symbol}?timeframe=${state.timeframe}&with_forecast=true&pred_len=${predLen}`);
+      state.socket = socket;
+      socket.onopen = () => setConnection(true);
+      socket.onmessage = event => {
+        const message = JSON.parse(event.data);
+        if (message.type === 'market_update') {
+          updateQuote(message.quote);
+          updateCurrent(message.current_candle);
+          if (message.completed_candle) {
+            marketSeries.update(toCandle(message.completed_candle));
+            marketVolume.update(toVolume(message.completed_candle));
+            activeSeries.setData([]);
+          }
+          if (message.forecast_status === 'refreshing') $('forecastAge').textContent = 'Refreshing projection…';
+        } else if (message.type === 'projection_update') {
+          setProjection(message.projection);
+          $('forecastAge').textContent = `Updated ${new Date(message.generated_at).toLocaleTimeString()}`;
+        } else if (message.type === 'forecast_error' || message.type === 'error') {
+          toast(message.detail, 'error');
+        }
+      };
+      socket.onclose = () => setConnection(false, 'Live stream disconnected');
+      socket.onerror = () => setConnection(false, 'Live stream error');
+    }
+
+    async function loadTrading() {
+      const key = $('tradingKey').value.trim();
+      if (!key) {
+        state.tradingStatus = null;
+        $('modeBadge').textContent = 'TRADING LOCKED';
+        $('modeBadge').className = 'badge paper';
+        $('placeOrder').textContent = 'Connect trading to place order';
+        $('placeOrder').disabled = true;
+        return;
+      }
+      try {
+        const response = await fetch(`${apiBase()}/v1/trading/status`, { headers: tradingHeaders() });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Trading connection failed');
+        state.tradingStatus = payload;
+        const live = payload.mode === 'live';
+        $('modeBadge').textContent = payload.enabled ? `${payload.mode.toUpperCase()} TRADING` : 'TRADING DISABLED';
+        $('modeBadge').className = live ? 'badge live-trading' : 'badge paper';
+        $('orderModeText').textContent = payload.enabled ? `${payload.mode.toUpperCase()} · SL required` : 'Trading disabled by server';
+        $('placeOrder').disabled = !payload.enabled;
+        $('placeOrder').textContent = payload.enabled ? `${state.side === 'buy' ? 'Buy' : 'Sell'} ${$('symbol').value}` : 'Trading disabled by server';
+        const account = payload.account || {};
+        const currency = account.currency || 'USD';
+        $('accountEquity').textContent = money(account.equity, currency);
+        $('accountBalance').textContent = money(account.balance, currency);
+        $('accountMargin').textContent = money(account.margin_free, currency);
+        $('accountServer').textContent = account.server || 'MT5';
+        await loadPositions();
+      } catch (error) {
+        state.tradingStatus = null;
+        $('placeOrder').disabled = true;
+        $('modeBadge').textContent = 'TRADING LOCKED';
+        toast(error.message, 'error');
+      }
+    }
+
+    async function loadPositions() {
+      if (!$('tradingKey').value.trim()) return;
+      try {
+        const response = await fetch(`${apiBase()}/v1/trading/positions`, { headers: tradingHeaders() });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Could not load positions');
+        state.positions = payload.positions;
+        renderPositions();
+      } catch (error) { toast(error.message, 'error'); }
+    }
+
+    function renderPositions() {
+      $('positionCount').textContent = `${state.positions.length} position${state.positions.length === 1 ? '' : 's'}`;
+      if (!state.positions.length) {
+        $('positionsContainer').innerHTML = '<div class="empty-state">No open Traid-managed positions.</div>';
+        return;
+      }
+      const rows = state.positions.map(position => `
+        <tr>
+          <td>${position.symbol}</td>
+          <td><span class="side-pill ${position.side}">${position.side}</span></td>
+          <td>${position.volume}</td>
+          <td>${number(position.open_price, 4)}</td>
+          <td>${number(position.current_price, 4)}</td>
+          <td>${position.stop_loss ? number(position.stop_loss, 4) : '—'}</td>
+          <td class="${position.profit >= 0 ? 'profit-positive' : 'profit-negative'}">${number(position.profit, 2)}</td>
+          <td>${position.trailing ? `Trail ${number(position.trailing.distance, 2)}` : 'Off'}</td>
+          <td><button class="mini-button" data-close="${position.ticket}">Close</button></td>
+        </tr>`).join('');
+      $('positionsContainer').innerHTML = `<table><thead><tr><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>Current</th><th>Stop</th><th>P/L</th><th>Trailing</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+      document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => closePosition(Number(button.dataset.close))));
+    }
+
+    async function placeOrder() {
+      if (!state.tradingStatus?.enabled) return;
+      const button = $('placeOrder');
+      button.disabled = true;
+      try {
+        const payload = {
+          symbol: $('symbol').value,
+          side: state.side,
+          volume: Number($('volume').value),
+          stop_loss_distance: Number($('stopLoss').value),
+          take_profit_distance: Number($('takeProfit').value) || null,
+          trailing_distance: Number($('trailDistance').value) || null,
+          trailing_step: Number($('trailStep').value) || 0,
+          trailing_activation: Number($('trailActivation').value) || 0,
+          client_order_id: crypto.randomUUID(),
+          confirm_live: $('confirmLive').checked,
+        };
+        const response = await fetch(`${apiBase()}/v1/trading/orders`, { method: 'POST', headers: tradingHeaders(), body: JSON.stringify(payload) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Order failed');
+        toast(result.paper ? 'Paper order passed MT5 preflight.' : `Order executed at ${result.fill_price}`, 'success');
+        await loadTrading();
+      } catch (error) { toast(error.message, 'error'); }
+      finally { button.disabled = false; }
+    }
+
+    async function closePosition(ticket) {
+      if (!confirm(`Close position ${ticket}?`)) return;
+      try {
+        const response = await fetch(`${apiBase()}/v1/trading/positions/${ticket}/close`, {
+          method: 'POST', headers: tradingHeaders(),
+          body: JSON.stringify({ confirm_live: $('confirmLive').checked }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || 'Close failed');
+        toast(payload.executed ? 'Position closed.' : 'Paper close passed preflight.', 'success');
+        await loadTrading();
+      } catch (error) { toast(error.message, 'error'); }
+    }
+
+    function setSide(side) {
+      state.side = side;
+      document.querySelectorAll('.trade-tabs button').forEach(button => button.classList.toggle('active', button.dataset.side === side));
+      $('placeOrder').className = `primary-button ${side}`;
+      if (state.tradingStatus?.enabled) $('placeOrder').textContent = `${side === 'buy' ? 'Buy' : 'Sell'} ${$('symbol').value}`;
+    }
+
+    document.querySelectorAll('#timeframes button').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('#timeframes button').forEach(item => item.classList.remove('active'));
+      button.classList.add('active');
+      state.timeframe = button.dataset.value;
+      loadMarket();
+    }));
+    document.querySelectorAll('.trade-tabs button').forEach(button => button.addEventListener('click', () => setSide(button.dataset.side)));
+    $('symbol').addEventListener('change', () => { setSide(state.side); loadMarket(); });
+    $('placeOrder').addEventListener('click', placeOrder);
+    $('refreshPositions').addEventListener('click', loadTrading);
+    $('settingsButton').addEventListener('click', () => $('settingsDrawer').classList.toggle('open'));
+    $('saveSettings').addEventListener('click', () => {
+      sessionStorage.setItem('traidApiUrl', $('apiUrl').value);
+      sessionStorage.setItem('traidTradingKey', $('tradingKey').value);
+      sessionStorage.setItem('traidPredLen', $('predLen').value);
+      $('settingsDrawer').classList.remove('open');
+      loadMarket();
+      loadTrading();
+    });
+
+    $('apiUrl').value = sessionStorage.getItem('traidApiUrl') || $('apiUrl').value;
+    $('tradingKey').value = sessionStorage.getItem('traidTradingKey') || '';
+    $('predLen').value = sessionStorage.getItem('traidPredLen') || $('predLen').value;
+    setSide('buy');
+    loadMarket();
+    loadTrading();
+    setInterval(() => { if (state.tradingStatus?.enabled) loadTrading(); }, 5000);
   </script>
 </body>
 </html>
