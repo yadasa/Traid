@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -12,7 +13,24 @@ CANDLE_COLUMNS = ["timestamp", "open", "high", "low", "close", "volume", "amount
 
 
 class MarketDataError(RuntimeError):
-    """Raised when a market-data provider cannot return valid candles."""
+    """Raised when a market-data provider cannot return valid market data."""
+
+
+@dataclass(frozen=True)
+class MarketQuote:
+    symbol: str
+    timestamp: pd.Timestamp
+    price: float
+    bid: float | None = None
+    ask: float | None = None
+    spread: float | None = None
+    delayed: bool | None = None
+    source: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["timestamp"] = pd.Timestamp(self.timestamp).isoformat()
+        return payload
 
 
 class CandleProvider(ABC):
@@ -21,6 +39,24 @@ class CandleProvider(ABC):
     @abstractmethod
     def get_candles(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
         """Return completed candles in chronological order."""
+
+    def get_quote(self, symbol: str) -> MarketQuote:
+        """Return the freshest available quote, falling back to the latest closed bar."""
+        canonical = normalize_symbol(symbol)
+        latest = self.get_candles(canonical, "1m", 2).iloc[-1]
+        return MarketQuote(
+            symbol=canonical,
+            timestamp=pd.Timestamp(latest["timestamp"]),
+            price=float(latest["close"]),
+            delayed=True,
+            source=f"{self.name}:latest_completed_bar",
+        )
+
+    def get_current_candle(self, symbol: str, timeframe: str) -> pd.DataFrame | None:
+        """Return the still-forming candle when the provider exposes it."""
+        normalize_symbol(symbol)
+        get_timeframe(timeframe)
+        return None
 
     def future_timestamps(
         self,
@@ -49,7 +85,11 @@ class CandleProvider(ABC):
         return pd.DatetimeIndex(output)
 
     @staticmethod
-    def normalize_frame(frame: pd.DataFrame, limit: int) -> pd.DataFrame:
+    def normalize_frame(
+        frame: pd.DataFrame,
+        limit: int,
+        minimum_rows: int = 2,
+    ) -> pd.DataFrame:
         missing = set(CANDLE_COLUMNS) - set(frame.columns)
         if missing:
             raise MarketDataError(f"Provider response is missing columns: {sorted(missing)}")
@@ -66,8 +106,10 @@ class CandleProvider(ABC):
         clean = clean.drop_duplicates(subset=["timestamp"], keep="last")
         clean = clean.sort_values("timestamp").tail(limit).reset_index(drop=True)
 
-        if len(clean) < 2:
-            raise MarketDataError("At least two completed candles are required.")
+        if len(clean) < minimum_rows:
+            raise MarketDataError(
+                f"At least {minimum_rows} candle row(s) are required; received {len(clean)}."
+            )
         return clean
 
     @staticmethod
