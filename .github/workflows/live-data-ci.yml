@@ -28,5 +28,16 @@ jobs:
         run: python -m pip install -r requirements-live.txt
       - name: Compile live package
         run: python -m compileall -q traid_live
+      - name: Check dashboard JavaScript syntax
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          html = Path("dashboard/index.html").read_text(encoding="utf-8")
+          script = html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
+          Path("/tmp/traid-dashboard.js").write_text(script, encoding="utf-8")
+          PY
+          node --check /tmp/traid-dashboard.js
       - name: Run tests
         run: python -m pytest -q tests/test_live_data.py
