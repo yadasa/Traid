@@ -10,7 +10,6 @@ from typing import Any, Literal
 
 from .config import Settings
 from .market import normalize_symbol
-from .providers.base import MarketDataError
 from .providers.mt5 import MT5Provider
 
 
@@ -135,7 +134,11 @@ class MT5TradeExecutor:
         self._idempotency: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
 
-    def _assert_enabled(self, confirm_live: bool = False) -> None:
+    def _assert_enabled(
+        self,
+        confirm_live: bool = False,
+        require_live_confirmation: bool = True,
+    ) -> None:
         if not self.settings.trading_enabled:
             raise TradingError(
                 "Trading is disabled. Set TRAID_TRADING_ENABLED=true after testing in paper mode."
@@ -145,7 +148,11 @@ class MT5TradeExecutor:
             raise TradingError(f"MT5 terminal information is unavailable: {self.mt5.last_error()}")
         if not getattr(terminal, "trade_allowed", False):
             raise TradingError("MT5 automated trading is disabled in the terminal.")
-        if self.settings.trading_mode == "live" and not confirm_live:
+        if (
+            require_live_confirmation
+            and self.settings.trading_mode == "live"
+            and not confirm_live
+        ):
             raise TradingError("Live orders require confirm_live=true.")
 
     def status(self) -> dict[str, Any]:
@@ -181,10 +188,13 @@ class MT5TradeExecutor:
         if positions is None:
             raise TradingError(f"Could not read positions: {self.mt5.last_error()}")
         reverse_aliases = {value: key for key, value in self.provider.aliases.items()}
+        trailing_by_ticket = {
+            spec.position_ticket: asdict(spec) for spec in self.trailing.list()
+        }
         output: list[dict[str, Any]] = []
         for position in positions:
             canonical = reverse_aliases.get(position.symbol)
-            if canonical is None:
+            if canonical is None or int(position.magic) != self.settings.trading_magic:
                 continue
             side = "buy" if position.type == self.mt5.POSITION_TYPE_BUY else "sell"
             output.append(
@@ -203,14 +213,7 @@ class MT5TradeExecutor:
                     "magic": int(position.magic),
                     "comment": position.comment,
                     "opened_at": int(position.time),
-                    "trailing": next(
-                        (
-                            asdict(spec)
-                            for spec in self.trailing.list()
-                            if spec.position_ticket == int(position.ticket)
-                        ),
-                        None,
-                    ),
+                    "trailing": trailing_by_ticket.get(int(position.ticket)),
                 }
             )
         return output
@@ -244,14 +247,42 @@ class MT5TradeExecutor:
         return max(matching, key=lambda position: position.time_msc, default=None)
 
     def _preflight(self, request: dict[str, Any]) -> Any:
-        check = self.mt5.order_check(request)
-        if check is None:
-            raise TradingError(f"MT5 order_check failed: {self.mt5.last_error()}")
-        if int(check.retcode) != 0:
-            raise TradingError(
-                f"Order rejected during preflight ({check.retcode}): {check.comment}"
-            )
-        return check
+        """Run order_check and select a broker-supported filling policy."""
+        original_filling = request.get("type_filling")
+        if request.get("action") == self.mt5.TRADE_ACTION_DEAL:
+            candidates = [
+                original_filling,
+                self.mt5.ORDER_FILLING_RETURN,
+                self.mt5.ORDER_FILLING_IOC,
+                self.mt5.ORDER_FILLING_FOK,
+            ]
+        else:
+            candidates = [original_filling]
+
+        seen: set[int | None] = set()
+        errors: list[str] = []
+        for filling in candidates:
+            if filling in seen:
+                continue
+            seen.add(filling)
+            candidate = dict(request)
+            if filling is None:
+                candidate.pop("type_filling", None)
+            else:
+                candidate["type_filling"] = filling
+            check = self.mt5.order_check(candidate)
+            if check is None:
+                errors.append(str(self.mt5.last_error()))
+                continue
+            if int(check.retcode) == 0:
+                request.clear()
+                request.update(candidate)
+                return check
+            errors.append(f"{check.retcode}: {check.comment}")
+
+        raise TradingError(
+            "Order rejected during preflight. " + " | ".join(errors[-3:])
+        )
 
     def place_market_order(self, order: MarketOrder) -> dict[str, Any]:
         with self._lock:
@@ -343,23 +374,16 @@ class MT5TradeExecutor:
                     "fill_price": float(send_result.price),
                 }
                 if position and order.trailing_distance and order.trailing_distance > 0:
-                    self.trailing.put(
-                        TrailingStopSpec(
-                            position_ticket=int(position.ticket),
-                            symbol=canonical,
-                            side=order.side,
-                            distance=float(order.trailing_distance),
-                            step=max(0.0, float(order.trailing_step)),
-                            activation=max(0.0, float(order.trailing_activation)),
-                        )
+                    trailing_spec = TrailingStopSpec(
+                        position_ticket=int(position.ticket),
+                        symbol=canonical,
+                        side=order.side,
+                        distance=float(order.trailing_distance),
+                        step=max(0.0, float(order.trailing_step)),
+                        activation=max(0.0, float(order.trailing_activation)),
                     )
-                    result["trailing"] = asdict(
-                        next(
-                            spec
-                            for spec in self.trailing.list()
-                            if spec.position_ticket == int(position.ticket)
-                        )
-                    )
+                    self.trailing.put(trailing_spec)
+                    result["trailing"] = asdict(trailing_spec)
 
             if order.client_order_id:
                 self._idempotency[order.client_order_id] = result
@@ -379,14 +403,16 @@ class MT5TradeExecutor:
             position = positions[0]
             reverse_aliases = {value: key for key, value in self.provider.aliases.items()}
             canonical = reverse_aliases.get(position.symbol)
-            if canonical is None:
+            if canonical is None or int(position.magic) != self.settings.trading_magic:
                 raise TradingError("This position is not managed by Traid.")
             info = self.mt5.symbol_info(position.symbol)
             tick = self.mt5.symbol_info_tick(position.symbol)
             if info is None or tick is None:
                 raise TradingError(f"Could not read {position.symbol} market information.")
-            close_volume = float(position.volume) if volume is None else self._normalize_volume(
-                volume, info, float(position.volume)
+            close_volume = (
+                float(position.volume)
+                if volume is None
+                else self._normalize_volume(volume, info, float(position.volume))
             )
             is_buy = position.type == self.mt5.POSITION_TYPE_BUY
             request = {
@@ -431,19 +457,21 @@ class MT5TradeExecutor:
             }
 
     def configure_trailing(self, spec: TrailingStopSpec) -> dict[str, Any]:
-        self._assert_enabled(False)
+        self._assert_enabled(require_live_confirmation=False)
         positions = self.mt5.positions_get(ticket=spec.position_ticket)
         if not positions:
             raise TradingError(f"Position {spec.position_ticket} was not found.")
         position = positions[0]
         reverse_aliases = {value: key for key, value in self.provider.aliases.items()}
         canonical = reverse_aliases.get(position.symbol)
-        if canonical != normalize_symbol(spec.symbol):
-            raise TradingError("Position symbol does not match the trailing-stop request.")
+        if (
+            canonical != normalize_symbol(spec.symbol)
+            or int(position.magic) != self.settings.trading_magic
+        ):
+            raise TradingError("Position is not managed by Traid or its symbol does not match.")
         if spec.distance <= 0:
             raise TradingError("Trailing distance must be positive.")
-        actual_side = "buy" if position.type == self.mt5.POSITION_TYPE_BUY else "sell"
-        spec.side = actual_side
+        spec.side = "buy" if position.type == self.mt5.POSITION_TYPE_BUY else "sell"
         spec.symbol = canonical
         self.trailing.put(spec)
         return asdict(spec)
@@ -459,6 +487,9 @@ class MT5TradeExecutor:
                 self.trailing.remove(spec.position_ticket)
                 continue
             position = positions[0]
+            if int(position.magic) != self.settings.trading_magic:
+                self.trailing.remove(spec.position_ticket)
+                continue
             info = self.mt5.symbol_info(position.symbol)
             tick = self.mt5.symbol_info_tick(position.symbol)
             if info is None or tick is None:
