@@ -4,7 +4,8 @@ import pandas as pd
 
 from traid_live.forecast import enforce_market_constraints
 from traid_live.market import get_timeframe, normalize_symbol
-from traid_live.providers.base import CandleProvider
+from traid_live.providers.base import CandleProvider, MarketQuote
+from traid_live.trading import next_trailing_stop
 
 
 class FakeProvider(CandleProvider):
@@ -36,6 +37,22 @@ def test_future_timestamps_skip_weekend() -> None:
     assert result[0] == pd.Timestamp("2026-08-03T00:00:00Z")
 
 
+def test_market_quote_serializes_timestamp() -> None:
+    quote = MarketQuote(
+        symbol="XAUUSD",
+        timestamp=pd.Timestamp("2026-07-31T12:00:00Z"),
+        price=3300.25,
+        bid=3300.2,
+        ask=3300.3,
+        spread=0.1,
+        delayed=False,
+        source="test",
+    )
+    payload = quote.to_dict()
+    assert payload["timestamp"] == "2026-07-31T12:00:00+00:00"
+    assert payload["price"] == 3300.25
+
+
 def test_decoded_candle_constraints_are_repaired() -> None:
     frame = pd.DataFrame(
         {
@@ -52,3 +69,46 @@ def test_decoded_candle_constraints_are_repaired() -> None:
     assert repaired.loc[0, "low"] == 100.0
     assert repaired.loc[0, "volume"] == 0.0
     assert repaired.loc[0, "amount"] == 0.0
+
+
+def test_buy_trailing_stop_only_tightens() -> None:
+    candidate = next_trailing_stop(
+        side="buy",
+        current_price=110.0,
+        open_price=100.0,
+        current_sl=104.0,
+        distance=3.0,
+        step=1.0,
+        activation=5.0,
+        min_stop_distance=0.5,
+        digits=2,
+    )
+    assert candidate == 107.0
+
+    no_change = next_trailing_stop(
+        side="buy",
+        current_price=107.5,
+        open_price=100.0,
+        current_sl=105.0,
+        distance=3.0,
+        step=1.0,
+        activation=5.0,
+        min_stop_distance=0.5,
+        digits=2,
+    )
+    assert no_change is None
+
+
+def test_sell_trailing_stop_only_tightens() -> None:
+    candidate = next_trailing_stop(
+        side="sell",
+        current_price=90.0,
+        open_price=100.0,
+        current_sl=96.0,
+        distance=3.0,
+        step=1.0,
+        activation=5.0,
+        min_stop_distance=0.5,
+        digits=2,
+    )
+    assert candidate == 93.0
