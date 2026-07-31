@@ -35,7 +35,7 @@ class ForecastEngine:
         self.settings = settings or Settings()
         self.provider = provider or build_provider(self.settings)
         self._predictor: KronosPredictor | None = None
-        self._model_lock = threading.Lock()
+        self._model_lock = threading.RLock()
 
     @property
     def predictor(self) -> KronosPredictor:
