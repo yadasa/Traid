@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from functools import lru_cache
 from typing import Any
 
@@ -18,8 +19,8 @@ from .providers import MarketDataError
 settings = Settings()
 app = FastAPI(
     title="Traid Live Forecast API",
-    version="0.1.0",
-    description="Completed live candles and Kronos projections for metals and US indices.",
+    version="0.2.0",
+    description="Live quotes, completed candles, active candles, and Kronos projections.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -46,13 +47,28 @@ def get_engine() -> ForecastEngine:
     return ForecastEngine(settings=settings)
 
 
-def frame_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+def frame_records(frame: pd.DataFrame | None) -> list[dict[str, Any]]:
+    if frame is None or frame.empty:
+        return []
     copy = frame.copy()
     if "timestamp" in copy.columns:
         copy["timestamp"] = pd.to_datetime(copy["timestamp"], utc=True).map(
             lambda value: value.isoformat()
         )
     return copy.to_dict(orient="records")
+
+
+def build_forecast_parameters(
+    symbol: str,
+    timeframe: str,
+    pred_len: int,
+) -> ForecastParameters:
+    return ForecastParameters(
+        symbol=symbol,
+        timeframe=timeframe,
+        lookback=settings.default_lookback,
+        pred_len=pred_len,
+    )
 
 
 @app.get("/health")
@@ -62,6 +78,8 @@ def health() -> dict[str, Any]:
         "provider": settings.provider,
         "model": settings.model_id,
         "model_loaded": bool(get_engine.cache_info().currsize and get_engine()._predictor),
+        "quote_poll_seconds": settings.quote_poll_seconds,
+        "bar_poll_seconds": settings.bar_poll_seconds,
     }
 
 
@@ -73,6 +91,30 @@ def symbols() -> dict[str, Any]:
         "provider": settings.provider,
         "aliases": settings.symbol_aliases() if settings.provider == "mt5" else None,
     }
+
+
+@app.get("/v1/quote/{symbol}")
+async def quote(symbol: str, timeframe: str = Query(default="5m")) -> dict[str, Any]:
+    try:
+        canonical = normalize_symbol(symbol)
+        engine = get_engine()
+        live_quote = await asyncio.to_thread(engine.provider.get_quote, canonical)
+        current_candle = await asyncio.to_thread(
+            engine.provider.get_current_candle,
+            canonical,
+            timeframe,
+        )
+        return {
+            "symbol": canonical,
+            "timeframe": timeframe,
+            "provider": engine.provider.name,
+            "quote": live_quote.to_dict(),
+            "current_candle": frame_records(current_candle)[0]
+            if current_candle is not None and not current_candle.empty
+            else None,
+        }
+    except (ValueError, MarketDataError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/v1/candles/{symbol}")
@@ -111,14 +153,28 @@ async def forecast(request: ForecastRequest) -> dict[str, Any]:
             sample_count=request.sample_count,
         )
         history, projection = await asyncio.to_thread(get_engine().forecast, params)
+        engine = get_engine()
+        live_quote = await asyncio.to_thread(
+            engine.provider.get_quote,
+            normalize_symbol(request.symbol),
+        )
+        current_candle = await asyncio.to_thread(
+            engine.provider.get_current_candle,
+            normalize_symbol(request.symbol),
+            request.timeframe,
+        )
         return {
             "symbol": normalize_symbol(request.symbol),
             "timeframe": request.timeframe,
-            "provider": get_engine().provider.name,
+            "provider": engine.provider.name,
             "model": settings.model_id,
             "completed_only": True,
             "parameters": request.model_dump(),
             "history": frame_records(history),
+            "current_candle": frame_records(current_candle)[0]
+            if current_candle is not None and not current_candle.empty
+            else None,
+            "quote": live_quote.to_dict(),
             "projection": frame_records(projection),
             "warning": "Probabilistic model output; not investment advice or an execution signal.",
         }
@@ -137,41 +193,89 @@ async def stream(
     pred_len: int = 24,
 ) -> None:
     await websocket.accept()
+    forecast_task: asyncio.Task[tuple[pd.DataFrame, pd.DataFrame]] | None = None
     try:
         canonical = normalize_symbol(symbol)
-        last_sent: str | None = None
-        while True:
-            try:
-                engine = get_engine()
-                frame = await asyncio.to_thread(engine.candles, canonical, timeframe, 2)
-                latest = frame.tail(1)
-                latest_timestamp = latest["timestamp"].iloc[0].isoformat()
+        engine = get_engine()
+        initial_frame = await asyncio.to_thread(engine.candles, canonical, timeframe, 2)
+        last_completed = initial_frame["timestamp"].iloc[-1].isoformat()
+        next_bar_check = 0.0
+        quote_poll = settings.quote_poll_seconds
+        if engine.provider.name == "massive":
+            # Avoid hammering a REST snapshot endpoint. MT5 remains sub-second.
+            quote_poll = max(quote_poll, 2.0)
 
-                if latest_timestamp != last_sent:
-                    payload: dict[str, Any] = {
-                        "type": "completed_candle",
-                        "symbol": canonical,
-                        "timeframe": timeframe,
-                        "data": frame_records(latest)[0],
-                    }
-                    if with_forecast:
-                        params = ForecastParameters(
-                            symbol=canonical,
-                            timeframe=timeframe,
-                            lookback=settings.default_lookback,
-                            pred_len=pred_len,
-                        )
-                        _, projection = await asyncio.to_thread(engine.forecast, params)
-                        payload["projection"] = frame_records(projection)
-                    await websocket.send_json(payload)
-                    last_sent = latest_timestamp
-                else:
-                    await websocket.send_json(
-                        {"type": "heartbeat", "last_completed": last_sent}
+        while True:
+            loop_started = time.monotonic()
+            try:
+                live_quote = await asyncio.to_thread(engine.provider.get_quote, canonical)
+                current_candle = await asyncio.to_thread(
+                    engine.provider.get_current_candle,
+                    canonical,
+                    timeframe,
+                )
+                payload: dict[str, Any] = {
+                    "type": "market_update",
+                    "symbol": canonical,
+                    "timeframe": timeframe,
+                    "quote": live_quote.to_dict(),
+                    "current_candle": frame_records(current_candle)[0]
+                    if current_candle is not None and not current_candle.empty
+                    else None,
+                    "server_timestamp": pd.Timestamp.now(tz="UTC").isoformat(),
+                }
+
+                now = time.monotonic()
+                if now >= next_bar_check:
+                    latest_frame = await asyncio.to_thread(
+                        engine.candles,
+                        canonical,
+                        timeframe,
+                        2,
                     )
+                    latest = latest_frame.tail(1)
+                    latest_timestamp = latest["timestamp"].iloc[0].isoformat()
+                    if latest_timestamp != last_completed:
+                        payload["completed_candle"] = frame_records(latest)[0]
+                        last_completed = latest_timestamp
+                        if with_forecast and forecast_task is None:
+                            params = build_forecast_parameters(
+                                canonical,
+                                timeframe,
+                                pred_len,
+                            )
+                            forecast_task = asyncio.create_task(
+                                asyncio.to_thread(engine.forecast, params)
+                            )
+                            payload["forecast_status"] = "refreshing"
+                    next_bar_check = now + settings.bar_poll_seconds
+
+                await websocket.send_json(payload)
+
+                if forecast_task is not None and forecast_task.done():
+                    try:
+                        _, projection = forecast_task.result()
+                        await websocket.send_json(
+                            {
+                                "type": "projection_update",
+                                "symbol": canonical,
+                                "timeframe": timeframe,
+                                "projection": frame_records(projection),
+                                "generated_at": pd.Timestamp.now(tz="UTC").isoformat(),
+                            }
+                        )
+                    except Exception as exc:
+                        await websocket.send_json(
+                            {"type": "forecast_error", "detail": str(exc)}
+                        )
+                    finally:
+                        forecast_task = None
             except Exception as exc:
                 await websocket.send_json({"type": "error", "detail": str(exc)})
 
-            await asyncio.sleep(settings.stream_poll_seconds)
+            elapsed = time.monotonic() - loop_started
+            await asyncio.sleep(max(0.05, quote_poll - elapsed))
     except WebSocketDisconnect:
+        if forecast_task is not None:
+            forecast_task.cancel()
         return
