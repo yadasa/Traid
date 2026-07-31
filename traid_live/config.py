@@ -3,13 +3,17 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 SUPPORTED_SYMBOLS = ("XAUUSD", "XAGUSD", "NAS100", "SPX500")
 
 
 @dataclass(frozen=True)
 class Settings:
-    """Runtime configuration loaded from environment variables."""
+    """Runtime configuration loaded from environment variables and an optional .env file."""
 
     provider: str = os.getenv("TRAID_PROVIDER", "mt5").lower()
     model_id: str = os.getenv("TRAID_MODEL_ID", "NeoQuasar/Kronos-small")
