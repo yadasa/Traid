@@ -151,3 +151,22 @@ def test_dashboard_has_responsive_and_advanced_contracts() -> None:
         assert "FORECAST_TRANSITION_MS = 333" in js
         assert "advancedForecast" in html
         assert "projectionHistory" in js
+
+def test_firebase_hosting_auth_and_identity_contracts() -> None:
+    root = Path(__file__).resolve().parents[1]
+    firebase = json.loads((root / "firebase.json").read_text(encoding="utf-8"))
+    assert firebase["hosting"]["target"] == "keitraid"
+    assert firebase["hosting"]["public"] == "dashboard"
+    assert firebase["firestore"]["rules"] == "firestore.rules"
+
+    html = (root / "dashboard" / "index.html").read_text(encoding="utf-8")
+    auth_js = (root / "dashboard" / "firebase-auth.js").read_text(encoding="utf-8")
+    rules = (root / "firestore.rules").read_text(encoding="utf-8")
+    assert 'type="module" src="./firebase-auth.js"' in html
+    assert "signInWithPhoneNumber" in auth_js
+    assert "GoogleAuthProvider" in auth_js
+    assert "metadata?.creationTime" in auth_js
+    assert "PUBLIC_UID_SUFFIX_LENGTH = 14" in auth_js
+    assert "public_uid" in rules
+    assert "^[0-9]{6}[A-Z0-9]{14}$" in rules
+

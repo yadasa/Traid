@@ -1,0 +1,70 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function validPublicUid(value) {
+      return value is string
+        && value.matches('^[0-9]{6}[A-Z0-9]{14}$');
+    }
+
+    match /users/{userId} {
+      allow get: if owns(userId);
+      allow list: if false;
+
+      allow create: if owns(userId)
+        && request.resource.data.keys().hasOnly([
+          'auth_uid',
+          'public_uid',
+          'created_at',
+          'updated_at',
+          'last_sign_in_at',
+          'display_name',
+          'email',
+          'phone_number',
+          'photo_url',
+          'provider_ids',
+          'role',
+          'status'
+        ])
+        && request.resource.data.auth_uid == request.auth.uid
+        && validPublicUid(request.resource.data.public_uid)
+        && request.resource.data.created_at == request.time
+        && request.resource.data.updated_at == request.time
+        && request.resource.data.last_sign_in_at == request.time
+        && request.resource.data.role == 'user'
+        && request.resource.data.status == 'active';
+
+      allow update: if owns(userId)
+        && request.resource.data.auth_uid == resource.data.auth_uid
+        && request.resource.data.public_uid == resource.data.public_uid
+        && request.resource.data.created_at == resource.data.created_at
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.updated_at == request.time
+        && request.resource.data.last_sign_in_at == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'updated_at',
+          'last_sign_in_at',
+          'display_name',
+          'email',
+          'phone_number',
+          'photo_url',
+          'provider_ids'
+        ]);
+
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

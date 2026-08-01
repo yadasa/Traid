@@ -244,3 +244,11 @@ Actual order fills, broker symbol aliases, contract specifications, stop distanc
 ## License and upstream model
 
 Traid is built on the open-source Kronos financial candlestick foundation model. Upstream information and attribution are preserved in [docs/UPSTREAM_KRONOS.md](docs/UPSTREAM_KRONOS.md). See [LICENSE](LICENSE).
+
+<!-- TRAID_FIREBASE_START -->
+## Firebase application accounts
+
+Firebase is initialized for the `keitraid` Hosting target with Google and phone-number sign-in plus private per-user Firestore profiles. The first successful sign-in creates an immutable Traid public ID composed of the Firebase account creation date (`YYMMDD`) followed by 14 random uppercase letters/numbers. See [`FIREBASE.md`](FIREBASE.md) for provider activation, emulator, security-rule, and deployment instructions.
+
+Firebase application identity is intentionally separate from the privileged MT5 operator session; signing in with Google or phone does not grant live-trading permission.
+<!-- TRAID_FIREBASE_END -->

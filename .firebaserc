@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "keitraid"
+  },
+  "targets": {
+    "keitraid": {
+      "hosting": {
+        "keitraid": [
+          "keitraid"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -75,3 +75,4 @@ data/trailing_stops.json
 temp/
 tmp/
 .python-version
+dashboard/firebase-config.local.js
