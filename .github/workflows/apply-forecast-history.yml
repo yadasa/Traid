@@ -1,0 +1,301 @@
+name: Apply forecast history UI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-forecast-history.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add animated three-generation forecast display
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("dashboard/index.html")
+          html = path.read_text(encoding="utf-8")
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global html
+              if old not in html:
+                  raise SystemExit(f"Could not find dashboard block: {label}")
+              html = html.replace(old, new, 1)
+
+          replace_once(
+              """    .legend-swatch.ai { background: linear-gradient(90deg, var(--blue), var(--purple)); }""",
+              """    .legend-swatch.ai { background: linear-gradient(90deg, var(--blue), var(--purple)); }
+    .legend-swatch.ai-previous { background: linear-gradient(90deg, rgba(119,157,205,.67), rgba(147,118,202,.67)); }
+    .legend-swatch.ai-older { background: linear-gradient(90deg, rgba(143,151,162,.33), rgba(152,139,168,.33)); }""",
+              "forecast legend CSS",
+          )
+
+          replace_once(
+              """                <span class=\"legend-item\"><i class=\"legend-swatch ai\"></i>Kronos projection</span>""",
+              """                <span class=\"legend-item\"><i class=\"legend-swatch ai\"></i>Active forecast</span>
+                <span class=\"legend-item\"><i class=\"legend-swatch ai-previous\"></i>Previous · 67%</span>
+                <span class=\"legend-item\"><i class=\"legend-swatch ai-older\"></i>Older · 33%</span>""",
+              "forecast legend markup",
+          )
+
+          replace_once(
+              """          <div class=\"projection-label\">AI Projection · OHLCV</div>""",
+              """          <div class=\"projection-label\">Active AI Forecast · OHLCV</div>""",
+              "forecast label",
+          )
+
+          replace_once(
+              """      tradingStatus: null,
+      positions: [],""",
+              """      tradingStatus: null,
+      positions: [],
+      projectionHistory: [],
+      renderedProjection: [],
+      projectionAnimationFrame: null,""",
+              "forecast state",
+          )
+
+          replace_once(
+              """    const projectionSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: 'rgba(96,165,250,.88)', downColor: 'rgba(139,92,246,.88)',
+      borderUpColor: '#93c5fd', borderDownColor: '#a78bfa',
+      wickUpColor: '#60a5fa', wickDownColor: '#8b5cf6',
+      priceLineVisible: false, lastValueVisible: false,
+    });
+    const marketVolume = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceScaleId: 'volume', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });
+    const projectionVolume = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceScaleId: 'volume', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });""",
+              """    // Forecast series are intentionally ordered oldest -> previous -> active so
+    // the current forecast remains visually dominant when paths overlap.
+    const projectionOlderSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: 'rgba(143,151,162,.33)', downColor: 'rgba(152,139,168,.33)',
+      borderUpColor: 'rgba(151,158,168,.33)', borderDownColor: 'rgba(160,148,175,.33)',
+      wickUpColor: 'rgba(143,151,162,.33)', wickDownColor: 'rgba(152,139,168,.33)',
+      priceLineVisible: false, lastValueVisible: false,
+    });
+    const projectionPreviousSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: 'rgba(119,157,205,.67)', downColor: 'rgba(147,118,202,.67)',
+      borderUpColor: 'rgba(132,169,214,.67)', borderDownColor: 'rgba(160,132,214,.67)',
+      wickUpColor: 'rgba(119,157,205,.67)', wickDownColor: 'rgba(147,118,202,.67)',
+      priceLineVisible: false, lastValueVisible: false,
+    });
+    const projectionSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: 'rgba(96,165,250,.92)', downColor: 'rgba(139,92,246,.92)',
+      borderUpColor: '#93c5fd', borderDownColor: '#a78bfa',
+      wickUpColor: '#60a5fa', wickDownColor: '#8b5cf6',
+      priceLineVisible: false, lastValueVisible: false,
+    });
+    const marketVolume = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceScaleId: 'volume', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });
+    const projectionOlderVolume = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceScaleId: 'volume', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });
+    const projectionPreviousVolume = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceScaleId: 'volume', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });
+    const projectionVolume = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceScaleId: 'volume', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false,
+    });""",
+              "forecast chart series",
+          )
+
+          replace_once(
+              """    function setProjection(rows) {
+      projectionSeries.setData(rows.map(toCandle));
+      projectionVolume.setData(rows.map(row => toVolume(row, true)));
+      $('forecastAge').textContent = `Projected ${rows.length} candles`;
+    }""",
+              """    const FORECAST_TRANSITION_MS = 333;
+    const easeForecastTransition = progress => progress * progress * (3 - 2 * progress);
+    const cloneProjection = rows => rows.map(row => ({
+      ...row,
+      timestamp: row.timestamp,
+      open: +row.open,
+      high: +row.high,
+      low: +row.low,
+      close: +row.close,
+      volume: Math.max(0, +(row.volume || 0)),
+      amount: Math.max(0, +(row.amount || 0)),
+    }));
+    const toForecastVolume = (row, color) => ({
+      time: toTime(row.timestamp),
+      value: Math.max(0, +(row.volume || 0)),
+      color,
+    });
+
+    function resetProjectionHistory() {
+      if (state.projectionAnimationFrame) cancelAnimationFrame(state.projectionAnimationFrame);
+      state.projectionAnimationFrame = null;
+      state.projectionHistory = [];
+      state.renderedProjection = [];
+      projectionSeries.setData([]);
+      projectionPreviousSeries.setData([]);
+      projectionOlderSeries.setData([]);
+      projectionVolume.setData([]);
+      projectionPreviousVolume.setData([]);
+      projectionOlderVolume.setData([]);
+    }
+
+    function renderPreviousForecasts() {
+      const previous = state.projectionHistory[1] || [];
+      const older = state.projectionHistory[2] || [];
+      projectionPreviousSeries.setData(previous.map(toCandle));
+      projectionOlderSeries.setData(older.map(toCandle));
+      projectionPreviousVolume.setData(previous.map(row => toForecastVolume(row, 'rgba(132,128,165,.21)')));
+      projectionOlderVolume.setData(older.map(row => toForecastVolume(row, 'rgba(145,145,155,.105)')));
+    }
+
+    function alignForecastStart(fromRows, toRows) {
+      if (!fromRows.length) return cloneProjection(toRows);
+      const byTime = new Map(fromRows.map(row => [toTime(row.timestamp), row]));
+      return toRows.map((target, index) => {
+        const exact = byTime.get(toTime(target.timestamp));
+        const fallback = fromRows[Math.min(index, fromRows.length - 1)] || target;
+        return { ...(exact || fallback), timestamp: target.timestamp };
+      });
+    }
+
+    function interpolateForecast(fromRows, toRows, progress) {
+      return toRows.map((target, index) => {
+        const start = fromRows[index] || target;
+        const interpolate = key => +start[key] + (+target[key] - +start[key]) * progress;
+        return {
+          ...target,
+          open: interpolate('open'),
+          high: interpolate('high'),
+          low: interpolate('low'),
+          close: interpolate('close'),
+          volume: interpolate('volume'),
+          amount: interpolate('amount'),
+        };
+      });
+    }
+
+    function animateActiveForecast(fromRows, toRows) {
+      if (state.projectionAnimationFrame) cancelAnimationFrame(state.projectionAnimationFrame);
+      const target = cloneProjection(toRows);
+      if (!fromRows.length) {
+        projectionSeries.setData(target.map(toCandle));
+        projectionVolume.setData(target.map(row => toForecastVolume(row, 'rgba(139,92,246,.32)')));
+        state.renderedProjection = target;
+        state.projectionAnimationFrame = null;
+        return;
+      }
+
+      const startRows = alignForecastStart(fromRows, target);
+      const startedAt = performance.now();
+      const draw = now => {
+        const linear = Math.min(1, (now - startedAt) / FORECAST_TRANSITION_MS);
+        const eased = easeForecastTransition(linear);
+        const frame = interpolateForecast(startRows, target, eased);
+        projectionSeries.setData(frame.map(toCandle));
+        projectionVolume.setData(frame.map(row => toForecastVolume(row, 'rgba(139,92,246,.32)')));
+        state.renderedProjection = frame;
+        if (linear < 1) {
+          state.projectionAnimationFrame = requestAnimationFrame(draw);
+        } else {
+          state.renderedProjection = target;
+          state.projectionAnimationFrame = null;
+        }
+      };
+      state.projectionAnimationFrame = requestAnimationFrame(draw);
+    }
+
+    function setProjection(rows) {
+      const next = cloneProjection(rows);
+      const priorActive = state.projectionHistory[0] || [];
+      const animationStart = state.renderedProjection.length
+        ? cloneProjection(state.renderedProjection)
+        : cloneProjection(priorActive);
+      const priorPrevious = state.projectionHistory[1] || [];
+
+      // Keep exactly three generations: active, previous (67%), and older (33%).
+      state.projectionHistory = [next, priorActive, priorPrevious]
+        .filter(forecast => forecast.length)
+        .slice(0, 3);
+      renderPreviousForecasts();
+      animateActiveForecast(animationStart, next);
+
+      const priorCount = Math.max(0, state.projectionHistory.length - 1);
+      $('forecastAge').textContent = `Active ${rows.length} candles · ${priorCount} prior`;
+    }""",
+              "forecast update function",
+          )
+
+          replace_once(
+              """      const predLen = Math.max(1, Number($('predLen').value || 24));
+      $('marketName').textContent = names[symbol];""",
+              """      const predLen = Math.max(1, Number($('predLen').value || 24));
+      resetProjectionHistory();
+      $('marketName').textContent = names[symbol];""",
+              "forecast reset on market change",
+          )
+
+          replace_once(
+              """          $('forecastAge').textContent = `Updated ${new Date(message.generated_at).toLocaleTimeString()}`;""",
+              """          const priorCount = Math.max(0, state.projectionHistory.length - 1);
+          $('forecastAge').textContent = `Active updated ${new Date(message.generated_at).toLocaleTimeString()} · ${priorCount} prior`;""",
+              "forecast status after update",
+          )
+
+          path.write_text(html, encoding="utf-8")
+
+          section = """<!-- TRAID_FORECAST_HISTORY_START -->
+## Forecast generations and transitions
+
+The dashboard distinguishes the current Kronos output from its two most recent predecessors:
+
+- **Active forecast:** full blue/purple saturation and opacity.
+- **Previous forecast:** remains at its original timestamps and OHLCV values, rendered at **67% opacity and saturation**.
+- **Older forecast:** remains at its original timestamps and OHLCV values, rendered at **33% opacity and saturation**.
+- No forecast older than those two predecessors remains visible.
+
+Whenever a completed candle triggers a new Kronos projection, the active projected OHLCV candles and projected volume ease from the most recently rendered forecast into the new one over exactly **333 ms**. Forecast timestamps shared by both generations interpolate directly; a newly added horizon candle begins from the nearest prior forecast candle. The former active forecast is retained in place as the 67% generation, and the former 67% generation becomes the 33% generation.
+
+Changing the symbol, timeframe, API URL, or reconnecting resets forecast history so projections from different market contexts are never mixed. Forecast history is visual client-side state; it does not alter open positions, Stop Loss, Take Profit, or trailing-stop rules.
+<!-- TRAID_FORECAST_HISTORY_END -->"""
+
+          def upsert_section(filename: str) -> None:
+              doc_path = Path(filename)
+              text = doc_path.read_text(encoding="utf-8")
+              start = "<!-- TRAID_FORECAST_HISTORY_START -->"
+              end = "<!-- TRAID_FORECAST_HISTORY_END -->"
+              if start in text and end in text:
+                  before = text.split(start, 1)[0].rstrip()
+                  after = text.split(end, 1)[1].lstrip()
+                  updated = before + "\n\n" + section
+                  if after:
+                      updated += "\n\n" + after
+                  updated += "\n"
+              else:
+                  updated = text.rstrip() + "\n\n" + section + "\n"
+              doc_path.write_text(updated, encoding="utf-8")
+
+          for filename in ("README.md", "dashboard/README.md", "LIVE_DATA.md"):
+              upsert_section(filename)
+          PY
+
+      - name: Remove one-time updater and commit
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-forecast-history.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add animated forecast history generations"
+          git push origin HEAD:main
