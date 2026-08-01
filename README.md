@@ -1,337 +1,246 @@
-<div align="center">
-  <h2><b>Kronos: A Foundation Model for the Language of Financial Markets </b></h2>
-</div>
+# Traid
 
+**Traid is a live forecast-overlay trading terminal for XAUUSD, XAGUSD, NAS100, and SPX500.** It combines broker-exact MetaTrader 5 candles and quotes with Kronos OHLCV projections, persistent forecast evaluation, account-risk controls, journaling, replay, economic-event context, and guarded MT5 execution.
 
-<div align="center">
+The interface is optimized for both desktop and mobile:
 
-</a> 
-<a href="https://huggingface.co/NeoQuasar"> 
-<img src="https://img.shields.io/badge/🤗-Hugging_Face-yellow" alt="Hugging Face"> 
-</a> 
-<a href="https://shiyu-coder.github.io/Kronos-demo/"> <img src="https://img.shields.io/badge/🚀-Live_Demo-brightgreen" alt="Live Demo"> </a>
-<a href="https://github.com/shiyu-coder/Kronos/graphs/commit-activity"> 
-<img src="https://img.shields.io/github/last-commit/shiyu-coder/Kronos?color=blue" alt="Last Commit"> 
-</a> 
-<a href="https://github.com/shiyu-coder/Kronos/stargazers"> 
-<img src="https://img.shields.io/github/stars/shiyu-coder/Kronos?color=lightblue" alt="GitHub Stars"> 
-</a> 
-<a href="https://github.com/shiyu-coder/Kronos/network/members"> 
-<img src="https://img.shields.io/github/forks/shiyu-coder/Kronos?color=yellow" alt="GitHub Forks"> 
-</a> 
-<a href="./LICENSE"> 
-<img src="https://img.shields.io/github/license/shiyu-coder/Kronos?color=green" alt="License"> 
-</a>
+- **Desktop:** watchlist, chart/forecast workspace, analytics, account risk, and order ticket remain visible together.
+- **Tablet:** the order ticket moves below the chart without losing controls.
+- **Mobile:** chart-first layout, touch-sized controls, safe-area support, bottom navigation, slide-out watchlist, and a bottom-sheet order ticket.
 
-</div>
+> Traid provides probabilistic market information and execution tooling. It is not investment advice, does not guarantee prices, and does not automatically trade merely because a forecast changes.
 
-<div align="center">
-  <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://zdoc.app/de/shiyu-coder/Kronos">Deutsch</a> | 
-  <a href="https://zdoc.app/es/shiyu-coder/Kronos">Español</a> | 
-  <a href="https://zdoc.app/fr/shiyu-coder/Kronos">Français</a> | 
-  <a href="https://zdoc.app/ja/shiyu-coder/Kronos">日本語</a> | 
-  <a href="https://zdoc.app/ko/shiyu-coder/Kronos">한국어</a> | 
-  <a href="https://zdoc.app/pt/shiyu-coder/Kronos">Português</a> | 
-  <a href="https://zdoc.app/ru/shiyu-coder/Kronos">Русский</a> | 
-  <a href="https://zdoc.app/zh/shiyu-coder/Kronos">中文</a>
-</div>
+## Core capabilities
 
-<p align="center">
+### Live market and forecast overlay
 
-<img src="./figures/logo.png" width="100">
+- Broker-exact MT5 quotes and completed/active candles.
+- Massive cloud fallback for charting and forecasting.
+- Historical OHLCV, the current forming candle, and Kronos projections on one chart.
+- Candlestick and line-chart modes.
+- Exactly three displayed forecast generations:
+  - active forecast at full visual strength;
+  - previous forecast at 67% opacity/saturation;
+  - older forecast at 33%;
+  - no older forecasts remain visible.
+- A 333 ms eased transition from the most recently rendered forecast to each updated forecast.
+- Forecast jobs are queued if another candle closes while inference is still running.
 
-</p>
+### Basic and Advanced Forecast modes
 
-> Kronos is the **first open-source foundation model** for financial candlesticks (K-lines), 
-> trained on data from over **45 global exchanges**.
+**Basic mode** displays the active path, two prior paths, live market data, and historical accuracy.
 
+**Advanced Forecast mode is explicitly toggleable** and adds the more analytical revision features:
 
-</div>
+- multiple sampled Kronos paths;
+- median projection;
+- 25–75% and 10–90% uncertainty ranges;
+- bullish probability and confidence decay by horizon;
+- bullish/bearish direction-flip detection;
+- magnitude and timing changes;
+- forecast-volatility changes;
+- path similarity, stability, and candle consensus;
+- multi-timeframe consensus;
+- cross-market context.
 
-## 📰 News
-*   🚩 **[2025.11.10]** Kronos has been accpeted by AAAI 2026.
-*   🚩 **[2025.08.17]** We have released the scripts for fine-tuning! Check them out to adapt Kronos to your own tasks.
-*   🚩 **[2025.08.02]** Our paper is now available on [arXiv](https://arxiv.org/abs/2508.02739)!
+Advanced revision analytics are informational. They never close, reverse, resize, or modify an existing trade.
 
-<p align="center">
+### Persistent forecast ledger and evaluation
 
-## 📜 Introduction
+SQLite/WAL persistence records:
 
-**Kronos** is a family of decoder-only foundation models, pre-trained specifically for the "language" of financial markets—K-line sequences. Unlike general-purpose TSFMs, Kronos is designed to handle the unique, high-noise characteristics of financial data. It leverages a novel two-stage framework: 
-1. A specialized tokenizer first quantizes continuous, multi-dimensional K-line data (OHLCV) into **hierarchical discrete tokens**. 
-2. A large, autoregressive Transformer is then pre-trained on these tokens, enabling it to serve as a unified model for diverse quantitative tasks.
+- model and tokenizer version;
+- symbol, timeframe, provider, and generation timestamp;
+- input window and forecast parameters;
+- complete predicted OHLCV path;
+- uncertainty and revision analytics;
+- inference time.
 
-<p align="center">
-    <img src="figures/overview.png" alt="" align="center" width="700px" />
-</p>
+As real candles arrive, Traid scores forecasts by horizon using directional accuracy, close error, high/low error, range-hit rate, and volume error.
 
-## ✨ Live Demo 
-We have set up a live demo to visualize Kronos's forecasting results. The webpage showcases a forecast for the **BTC/USDT** trading pair over the next 24 hours. 
+### Risk-controlled MT5 execution
 
-**👉 [Access the Live Demo Here](https://shiyu-coder.github.io/Kronos-demo/)** 
+- Trading disabled by default.
+- Paper mode by default.
+- Broker `order_check` validation.
+- Required Stop Loss by default.
+- Risk-percentage position sizing using MT5 tick size/value and volume rules.
+- Maximum daily loss, weekly drawdown, simultaneous open risk, and consecutive-loss controls.
+- Emergency trading disable/resume and optional close-all.
+- Market, limit, and stop orders.
+- OCO pending-order groups.
+- Partial/full closing.
+- Direct SL/TP modification.
+- Break-even moves.
+- Fixed, percentage, ATR, and candle-high/low trailing methods.
+- Durable client-order idempotency and audit history.
+- MT5 magic-number ownership prevents Traid from managing unrelated positions.
 
-## 📦 Model Zoo 
-We release a family of pre-trained models with varying capacities to suit different computational and application needs. All models are readily accessible from the Hugging Face Hub.
+The previously proposed **spread/slippage/market-condition rejection gate is intentionally not implemented**, per project direction. MT5 broker validation still applies, but Traid does not reject trades based on a custom spread, volatility, rollover, or cross-feed threshold.
 
-| Model        | Tokenizer                                                                       | Context length | Params  | Open-source                                                               |
-|--------------|---------------------------------------------------------------------------------| -------------- | ------ |---------------------------------------------------------------------------|
-| Kronos-mini  | [Kronos-Tokenizer-2k](https://huggingface.co/NeoQuasar/Kronos-Tokenizer-2k)     | 2048           | 4.1M   | ✅ [NeoQuasar/Kronos-mini](https://huggingface.co/NeoQuasar/Kronos-mini)  |
-| Kronos-small | [Kronos-Tokenizer-base](https://huggingface.co/NeoQuasar/Kronos-Tokenizer-base) | 512            | 24.7M  | ✅ [NeoQuasar/Kronos-small](https://huggingface.co/NeoQuasar/Kronos-small) |
-| Kronos-base  | [Kronos-Tokenizer-base](https://huggingface.co/NeoQuasar/Kronos-Tokenizer-base) | 512            | 102.3M | ✅ [NeoQuasar/Kronos-base](https://huggingface.co/NeoQuasar/Kronos-base)   |
-| Kronos-large | [Kronos-Tokenizer-base](https://huggingface.co/NeoQuasar/Kronos-Tokenizer-base) | 512            | 499.2M | ❌                                                                         |
+### Workflow and analysis
 
+- Economic-calendar import through a configurable JSON endpoint, plus manual events.
+- Upcoming-event display and context.
+- Multi-timeframe and cross-market forecast context.
+- Historical replay with no future-candle leakage in the replay window.
+- Automatic and manual trading journal entries.
+- Forecast attached to each journaled entry.
+- Audit log for settings, forecasts, orders, journal changes, and emergency actions.
+- Browser notifications for meaningful forecast direction flips.
+- Watchlist, stale-feed warning, saveable local layout/preferences, and keyboard shortcuts.
 
-## 🚀 Getting Started
+## Quick start on Windows
 
-### Installation
+The official MetaTrader 5 Python package requires Windows and a locally installed MT5 terminal.
 
-1. Install Python 3.10+, and then install the dependencies:
-
-```shell
-pip install -r requirements.txt
+```powershell
+git clone https://github.com/yadasa/Traid.git
+cd Traid
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-live.txt
+Copy-Item .env.example .env
 ```
 
-### 📈 Making Forecasts
+Start the backend:
 
-Forecasting with Kronos is straightforward using the `KronosPredictor` class. It handles data preprocessing, normalization, prediction, and inverse normalization, allowing you to get from raw data to forecasts in just a few lines of code.
-
-**Important Note**: The `max_context` for `Kronos-small` and `Kronos-base` is **512**. This is the maximum sequence length the model can process. For optimal performance, it is recommended that your input data length (i.e., `lookback`) does not exceed this limit. The `KronosPredictor` will automatically handle truncation for longer contexts.
-
-Here is a step-by-step guide to making your first forecast.
-
-#### 1. Load the Tokenizer and Model
-
-First, load a pre-trained Kronos model and its corresponding tokenizer from the Hugging Face Hub.
-
-```python
-from model import Kronos, KronosTokenizer, KronosPredictor
-
-# Load from Hugging Face Hub
-tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
-model = Kronos.from_pretrained("NeoQuasar/Kronos-small")
+```powershell
+python -m traid_live.cli serve --host 127.0.0.1 --port 8000
 ```
 
-#### 2. Instantiate the Predictor
+Start the dashboard in another terminal:
 
-Create an instance of `KronosPredictor`, passing the model, tokenizer, and desired device.
-
-```python
-# Initialize the predictor
-predictor = KronosPredictor(model, tokenizer, max_context=512)
+```powershell
+python -m http.server 3000 -d dashboard
 ```
 
-#### 3. Prepare Input Data
+Open `http://localhost:3000`. API documentation is available at `http://localhost:8000/docs`.
 
-The `predict` method requires three main inputs:
--   `df`: A pandas DataFrame containing the historical K-line data. It must include columns `['open', 'high', 'low', 'close']`. `volume` and `amount` are optional.
--   `x_timestamp`: A pandas Series of timestamps corresponding to the historical data in `df`.
--   `y_timestamp`: A pandas Series of timestamps for the future periods you want to predict.
+## Minimum MT5 configuration
 
-```python
-import pandas as pd
+Keep MT5 running and logged into the intended account. Traid can use the account already active in the terminal.
 
-# Load your data
-df = pd.read_csv("./data/XSHG_5min_600977.csv")
-df['timestamps'] = pd.to_datetime(df['timestamps'])
-
-# Define context window and prediction length
-lookback = 400
-pred_len = 120
-
-# Prepare inputs for the predictor
-x_df = df.loc[:lookback-1, ['open', 'high', 'low', 'close', 'volume', 'amount']]
-x_timestamp = df.loc[:lookback-1, 'timestamps']
-y_timestamp = df.loc[lookback:lookback+pred_len-1, 'timestamps']
+```dotenv
+TRAID_PROVIDER=mt5
+TRAID_XAUUSD_SYMBOL=XAUUSD
+TRAID_XAGUSD_SYMBOL=XAGUSD
+TRAID_NAS100_SYMBOL=NAS100
+TRAID_SPX500_SYMBOL=SPX500
 ```
 
-#### 4. Generate Forecasts 
+Use the exact Market Watch names supplied by the broker, including suffixes such as `.a`, `.pro`, `_ECN`, or `.cash`.
 
-Call the `predict` method to generate forecasts. You can control the sampling process with parameters like `T`, `top_p`, and `sample_count` for probabilistic forecasting.
+Optional explicit terminal login values remain on the backend only:
 
-```python
-# Generate predictions
-pred_df = predictor.predict(
-    df=x_df,
-    x_timestamp=x_timestamp,
-    y_timestamp=y_timestamp,
-    pred_len=pred_len,
-    T=1.0,          # Temperature for sampling
-    top_p=0.9,      # Nucleus sampling probability
-    sample_count=1  # Number of forecast paths to generate and average
-)
-
-print("Forecasted Data Head:")
-print(pred_df.head())
+```dotenv
+MT5_TERMINAL_PATH=C:\Program Files\MetaTrader 5\terminal64.exe
+MT5_LOGIN=12345678
+MT5_PASSWORD=replace_me
+MT5_SERVER=Broker-Server
 ```
 
-The `predict` method returns a pandas DataFrame containing the forecasted values for `open`, `high`, `low`, `close`, `volume`, and `amount`, indexed by the `y_timestamp` you provided.
+Never place MT5 credentials in dashboard JavaScript or commit a real `.env` file.
 
-For efficient processing of multiple time series, Kronos provides a `predict_batch` method that enables parallel prediction on multiple datasets simultaneously. This is particularly useful when you need to forecast multiple assets or time periods at once.
+## Authentication
 
-```python
-# Prepare multiple datasets for batch prediction
-df_list = [df1, df2, df3]  # List of DataFrames
-x_timestamp_list = [x_ts1, x_ts2, x_ts3]  # List of historical timestamps
-y_timestamp_list = [y_ts1, y_ts2, y_ts3]  # List of future timestamps
+For a private local deployment, configure an administrator password or PBKDF2 hash:
 
-# Generate batch predictions
-pred_df_list = predictor.predict_batch(
-    df_list=df_list,
-    x_timestamp_list=x_timestamp_list,
-    y_timestamp_list=y_timestamp_list,
-    pred_len=pred_len,
-    T=1.0,
-    top_p=0.9,
-    sample_count=1,
-    verbose=True
-)
-
-# pred_df_list contains prediction results in the same order as input
-for i, pred_df in enumerate(pred_df_list):
-    print(f"Predictions for series {i}:")
-    print(pred_df.head())
+```dotenv
+TRAID_ADMIN_USER=admin
+TRAID_ADMIN_PASSWORD=replace_with_a_strong_password
 ```
 
-**Important Requirements for Batch Prediction:**
-- All series must have the same historical length (lookback window)
-- All series must have the same prediction length (`pred_len`)
-- Each DataFrame must contain the required columns: `['open', 'high', 'low', 'close']`
-- `volume` and `amount` columns are optional and will be filled with zeros if missing
+Generate a hash without storing the plaintext value:
 
-The `predict_batch` method leverages GPU parallelism for efficient processing and automatically handles normalization and denormalization for each series independently.
-
-#### 5. Example and Visualization
-
-For a complete, runnable script that includes data loading, prediction, and plotting, please see [`examples/prediction_example.py`](examples/prediction_example.py).
-
-Running this script will generate a plot comparing the ground truth data against the model's forecast, similar to the one shown below:
-
-<p align="center">
-    <img src="figures/prediction_example.png" alt="Forecast Example" align="center" width="600px" />
-</p>
-
-Additionally, we provide a script that makes predictions without Volume and Amount data, which can be found in [`examples/prediction_wo_vol_example.py`](examples/prediction_wo_vol_example.py).
-
-
-## 🔧 Finetuning on Your Own Data (A-Share Market Example)
-
-We provide a complete pipeline for finetuning Kronos on your own datasets. As an example, we demonstrate how to use [Qlib](https://github.com/microsoft/qlib) to prepare data from the Chinese A-share market and conduct a simple backtest.
-
-> **Disclaimer:** This pipeline is intended as a demonstration to illustrate the finetuning process. It is a simplified example and not a production-ready quantitative trading system. A robust quantitative strategy requires more sophisticated techniques, such as portfolio optimization and risk factor neutralization, to achieve stable alpha.
-
-The finetuning process is divided into four main steps:
-
-1.  **Configuration**: Set up paths and hyperparameters.
-2.  **Data Preparation**: Process and split your data using Qlib.
-3.  **Model Finetuning**: Finetune the Tokenizer and the Predictor models.
-4.  **Backtesting**: Evaluate the finetuned model's performance.
-
-### Prerequisites
-
-1.  First, ensure you have all dependencies from `requirements.txt` installed.
-2.  This pipeline relies on `qlib`. Please install it:
-    ```shell
-      pip install pyqlib
-    ```
-3.  You will need to prepare your Qlib data. Follow the [official Qlib guide](https://github.com/microsoft/qlib) to download and set up your data locally. The example scripts assume you are using daily frequency data.
-
-### Step 1: Configure Your Experiment
-
-All settings for data, training, and model paths are centralized in `finetune/config.py`. Before running any scripts, please **modify the following paths** according to your environment:
-
-*   `qlib_data_path`: Path to your local Qlib data directory.
-*   `dataset_path`: Directory where the processed train/validation/test pickle files will be saved.
-*   `save_path`: Base directory for saving model checkpoints.
-*   `backtest_result_path`: Directory for saving backtesting results.
-*   `pretrained_tokenizer_path` and `pretrained_predictor_path`: Paths to the pre-trained models you want to start from (can be local paths or Hugging Face model names).
-
-You can also adjust other parameters like `instrument`, `train_time_range`, `epochs`, and `batch_size` to fit your specific task. If you don't use [Comet.ml](https://www.comet.com/), set `use_comet = False`.
-
-### Step 2: Prepare the Dataset
-
-Run the data preprocessing script. This script will load raw market data from your Qlib directory, process it, split it into training, validation, and test sets, and save them as pickle files.
-
-```shell
-python finetune/qlib_data_preprocess.py
+```powershell
+python -c "from traid_live.auth import SessionAuth; print(SessionAuth.hash_password('replace_me'))"
 ```
 
-After running, you will find `train_data.pkl`, `val_data.pkl`, and `test_data.pkl` in the directory specified by `dataset_path` in your config.
+Then use:
 
-### Step 3: Run the Finetuning
-
-The finetuning process consists of two stages: finetuning the tokenizer and then the predictor. Both training scripts are designed for multi-GPU training using `torchrun`.
-
-#### 3.1 Finetune the Tokenizer
-
-This step adjusts the tokenizer to the data distribution of your specific domain.
-
-```shell
-# Replace NUM_GPUS with the number of GPUs you want to use (e.g., 2)
-torchrun --standalone --nproc_per_node=NUM_GPUS finetune/train_tokenizer.py
+```dotenv
+TRAID_ADMIN_PASSWORD_HASH=pbkdf2_sha256$...
 ```
 
-The best tokenizer checkpoint will be saved to the path configured in `config.py` (derived from `save_path` and `tokenizer_save_folder_name`).
+The legacy `TRAID_TRADING_API_KEY` remains supported for API clients, but dashboard sessions are preferred.
 
-#### 3.2 Finetune the Predictor
+## Paper trading first
 
-This step finetunes the main Kronos model for the forecasting task.
-
-```shell
-# Replace NUM_GPUS with the number of GPUs you want to use (e.g., 2)
-torchrun --standalone --nproc_per_node=NUM_GPUS finetune/train_predictor.py
+```dotenv
+TRAID_TRADING_ENABLED=true
+TRAID_TRADING_MODE=paper
+TRAID_REQUIRE_STOP_LOSS=true
+TRAID_MAX_ORDER_LOTS=1.0
+TRAID_MAX_OPEN_POSITIONS=4
+TRAID_MAX_POSITIONS_PER_SYMBOL=1
 ```
 
-The best predictor checkpoint will be saved to the path configured in `config.py`.
+Paper mode runs MT5 preflight validation but does not call `order_send`. Validate the complete workflow on an MT5 demo account before changing:
 
-### Step 4: Evaluate with Backtesting
-
-Finally, run the backtesting script to evaluate your finetuned model. This script loads the models, performs inference on the test set, generates prediction signals (e.g., forecasted price change), and runs a simple top-K strategy backtest.
-
-```shell
-# Specify the GPU for inference
-python finetune/qlib_test.py --device cuda:0
+```dotenv
+TRAID_TRADING_MODE=live
 ```
 
-The script will output a detailed performance analysis in your console and generate a plot showing the cumulative return curves of your strategy against the benchmark, similar to the one below:
+Live entries and closes also require explicit `confirm_live=true` from the dashboard or API.
 
-<p align="center">
-    <img src="figures/backtest_result_example.png" alt="Backtest Example" align="center" width="700px" />
-</p>
+## Cloud market-data fallback
 
-### 💡 From Demo to Production: Important Considerations
-
-*   **Raw Signals vs. Pure Alpha**: The signals generated by the model in this demo are raw predictions. In a real-world quantitative workflow, these signals would typically be fed into a portfolio optimization model. This model would apply constraints to neutralize exposure to common risk factors (e.g., market beta, style factors like size and value), thereby isolating the **"pure alpha"** and improving the strategy's robustness.
-*   **Data Handling**: The provided `QlibDataset` is an example. For different data sources or formats, you will need to adapt the data loading and preprocessing logic.
-*   **Strategy and Backtesting Complexity**: The simple top-K strategy used here is a basic starting point. Production-level strategies often incorporate more complex logic for portfolio construction, dynamic position sizing, and risk management (e.g., stop-loss/take-profit rules). Furthermore, a high-fidelity backtest should meticulously model transaction costs, slippage, and market impact to provide a more accurate estimate of real-world performance.
-
-> **📝 AI-Generated Comments**: Please note that many of the code comments within the `finetune/` directory were generated by an AI assistant (Gemini 2.5 Pro) for explanatory purposes. While they aim to be helpful, they may contain inaccuracies. We recommend treating the code itself as the definitive source of logic.
-
-## 📖 Citation
-
-If you use Kronos in your research, we would appreciate a citation to our [paper](https://arxiv.org/abs/2508.02739):
-
-```
-@misc{shi2025kronos,
-      title={Kronos: A Foundation Model for the Language of Financial Markets}, 
-      author={Yu Shi and Zongliang Fu and Shuo Chen and Bohan Zhao and Wei Xu and Changshui Zhang and Jian Li},
-      year={2025},
-      eprint={2508.02739},
-      archivePrefix={arXiv},
-      primaryClass={q-fin.ST},
-      url={https://arxiv.org/abs/2508.02739}, 
-}
+```dotenv
+TRAID_PROVIDER=massive
+MASSIVE_API_KEY=replace_me
 ```
 
-## 📜 License 
-This project is licensed under the [MIT License](./LICENSE).
+Default mappings:
 
+| Traid | Massive | Meaning |
+|---|---|---|
+| XAUUSD | `C:XAUUSD` | Spot gold/USD |
+| XAGUSD | `C:XAGUSD` | Spot silver/USD |
+| NAS100 | `I:NDX` | Nasdaq-100 cash index |
+| SPX500 | `I:SPX` | S&P 500 cash index |
 
+Cash indices are not identical to a broker's CFD products. MT5 remains the recommended source whenever forecasts and execution must match the broker.
 
+## Project structure
 
+```text
+traid_live/
+  service.py             FastAPI, WebSockets, workers, routes
+  platform.py            SQLite forecast/risk/journal/replay platform
+  advanced_trading.py    Pending/OCO orders and position management
+  trading.py             Guarded MT5 market execution and fixed trailing
+  forecast.py            Kronos inference
+  providers/             MT5 and Massive data adapters
+  auth.py                Local sessions and rate limiting
+dashboard/
+  index.html             Responsive semantic shell
+  app.css                Desktop/tablet/mobile terminal layouts
+  app.js                 Charting, forecasts, trading, replay, journal
+docs/                     Architecture, security, deployment, forecasting
+```
 
+## Documentation
 
+- [Live data and API](LIVE_DATA.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Forecasting](docs/FORECASTING.md)
+- [Trading and risk](docs/TRADING.md)
+- [Backtesting and replay](docs/BACKTESTING.md)
+- [Security](docs/SECURITY.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Upstream Kronos project](docs/UPSTREAM_KRONOS.md)
 
+## Validation
 
+```bash
+python -m compileall -q traid_live
+python -m pytest -q tests/test_live_data.py tests/test_platform.py
+node --check dashboard/app.js
+```
 
+Actual order fills, broker symbol aliases, contract specifications, stop distances, and filling policies must still be validated against the intended MT5 **demo** terminal and broker before live use.
 
+## License and upstream model
+
+Traid is built on the open-source Kronos financial candlestick foundation model. Upstream information and attribution are preserved in [docs/UPSTREAM_KRONOS.md](docs/UPSTREAM_KRONOS.md). See [LICENSE](LICENSE).
