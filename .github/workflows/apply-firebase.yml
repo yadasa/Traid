@@ -1,0 +1,695 @@
+name: Apply Firebase Hosting Auth and Firestore
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-firebase.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize Firebase and add account sign-in
+        shell: bash
+        run: |
+          cat > firebase.json <<'JSON'
+          {
+            "hosting": {
+              "target": "keitraid",
+              "public": "dashboard",
+              "ignore": [
+                "firebase.json",
+                "**/.*",
+                "**/node_modules/**"
+              ],
+              "cleanUrls": true,
+              "trailingSlash": false,
+              "rewrites": [
+                {
+                  "source": "**",
+                  "destination": "/index.html"
+                }
+              ],
+              "headers": [
+                {
+                  "source": "**/*.@(js|css)",
+                  "headers": [
+                    {
+                      "key": "Cache-Control",
+                      "value": "public,max-age=3600,must-revalidate"
+                    }
+                  ]
+                },
+                {
+                  "source": "**",
+                  "headers": [
+                    {
+                      "key": "X-Content-Type-Options",
+                      "value": "nosniff"
+                    },
+                    {
+                      "key": "Referrer-Policy",
+                      "value": "strict-origin-when-cross-origin"
+                    },
+                    {
+                      "key": "Permissions-Policy",
+                      "value": "camera=(), microphone=(), geolocation=()"
+                    }
+                  ]
+                }
+              ]
+            },
+            "firestore": {
+              "rules": "firestore.rules",
+              "indexes": "firestore.indexes.json"
+            },
+            "emulators": {
+              "auth": {
+                "port": 9099
+              },
+              "firestore": {
+                "port": 8080
+              },
+              "hosting": {
+                "port": 5000
+              },
+              "ui": {
+                "enabled": true,
+                "port": 4000
+              },
+              "singleProjectMode": true
+            }
+          }
+          JSON
+
+          cat > .firebaserc <<'JSON'
+          {
+            "projects": {
+              "default": "keitraid"
+            },
+            "targets": {
+              "keitraid": {
+                "hosting": {
+                  "keitraid": [
+                    "keitraid"
+                  ]
+                }
+              }
+            },
+            "etags": {}
+          }
+          JSON
+
+          cat > firestore.indexes.json <<'JSON'
+          {
+            "indexes": [],
+            "fieldOverrides": []
+          }
+          JSON
+
+          cat > firestore.rules <<'RULES'
+          rules_version = '2';
+
+          service cloud.firestore {
+            match /databases/{database}/documents {
+              function signedIn() {
+                return request.auth != null;
+              }
+
+              function owns(userId) {
+                return signedIn() && request.auth.uid == userId;
+              }
+
+              function validPublicUid(value) {
+                return value is string
+                  && value.matches('^[0-9]{6}[A-Z0-9]{14}$');
+              }
+
+              match /users/{userId} {
+                allow get: if owns(userId);
+                allow list: if false;
+
+                allow create: if owns(userId)
+                  && request.resource.data.keys().hasOnly([
+                    'auth_uid',
+                    'public_uid',
+                    'created_at',
+                    'updated_at',
+                    'last_sign_in_at',
+                    'display_name',
+                    'email',
+                    'phone_number',
+                    'photo_url',
+                    'provider_ids',
+                    'role',
+                    'status'
+                  ])
+                  && request.resource.data.auth_uid == request.auth.uid
+                  && validPublicUid(request.resource.data.public_uid)
+                  && request.resource.data.created_at == request.time
+                  && request.resource.data.updated_at == request.time
+                  && request.resource.data.last_sign_in_at == request.time
+                  && request.resource.data.role == 'user'
+                  && request.resource.data.status == 'active';
+
+                allow update: if owns(userId)
+                  && request.resource.data.auth_uid == resource.data.auth_uid
+                  && request.resource.data.public_uid == resource.data.public_uid
+                  && request.resource.data.created_at == resource.data.created_at
+                  && request.resource.data.role == resource.data.role
+                  && request.resource.data.status == resource.data.status
+                  && request.resource.data.updated_at == request.time
+                  && request.resource.data.last_sign_in_at == request.time
+                  && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                    'updated_at',
+                    'last_sign_in_at',
+                    'display_name',
+                    'email',
+                    'phone_number',
+                    'photo_url',
+                    'provider_ids'
+                  ]);
+
+                allow delete: if false;
+              }
+
+              match /{document=**} {
+                allow read, write: if false;
+              }
+            }
+          }
+          RULES
+
+          cat > dashboard/firebase-config.example.js <<'JS'
+          // Firebase Hosting automatically supplies configuration at
+          // /__/firebase/init.json. This file is only for development through a
+          // non-Firebase local web server. Copy it to firebase-config.local.js,
+          // replace every placeholder, and never commit that local file.
+          export const firebaseConfig = {
+            apiKey: 'REPLACE_WITH_WEB_API_KEY',
+            authDomain: 'keitraid.firebaseapp.com',
+            projectId: 'keitraid',
+            storageBucket: 'keitraid.firebasestorage.app',
+            messagingSenderId: 'REPLACE_WITH_SENDER_ID',
+            appId: 'REPLACE_WITH_WEB_APP_ID',
+          };
+          JS
+
+          cat > dashboard/firebase-auth.js <<'JS'
+          const FIREBASE_SDK_VERSION = '12.16.0';
+          const sdk = moduleName => `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/${moduleName}.js`;
+          const PUBLIC_UID_SUFFIX_LENGTH = 14;
+          const PUBLIC_UID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+          function injectAccountUI() {
+            if (document.getElementById('firebaseAccountButton')) return;
+
+            const style = document.createElement('style');
+            style.textContent = `
+              .firebase-account-button {
+                min-height: 35px; max-width: 170px; padding: 0 11px; display: inline-flex;
+                align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 999px;
+                background: rgba(16,23,46,.8); color: var(--text); cursor: pointer;
+                font-size: 10px; font-weight: 800; white-space: nowrap; overflow: hidden;
+              }
+              .firebase-account-button .account-avatar {
+                width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center;
+                border-radius: 50%; background: linear-gradient(135deg,var(--blue),var(--purple));
+                font-size: 9px; color: white;
+              }
+              .firebase-account-button .account-label { overflow: hidden; text-overflow: ellipsis; }
+              .firebase-auth-layer { position: fixed; inset: 0; z-index: 120; display: none; }
+              .firebase-auth-layer.open { display: grid; place-items: center; }
+              .firebase-auth-backdrop { position: absolute; inset: 0; background: rgba(1,3,10,.76); backdrop-filter: blur(5px); }
+              .firebase-auth-card {
+                position: relative; width: min(440px,calc(100vw - 24px)); max-height: min(760px,calc(100dvh - 24px));
+                overflow: auto; padding: 18px; border: 1px solid var(--line-strong); border-radius: 17px;
+                background: linear-gradient(180deg,rgba(13,19,42,.99),rgba(7,11,27,.99)); box-shadow: var(--shadow);
+              }
+              .firebase-auth-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+              .firebase-auth-card h2 { margin: 3px 0 0; font-size: 18px; }
+              .firebase-auth-card p { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+              .firebase-auth-actions { display: grid; gap: 10px; margin-top: 17px; }
+              .firebase-google-button, .firebase-phone-button, .firebase-signout-button {
+                min-height: 44px; border: 1px solid var(--line-strong); border-radius: 10px;
+                background: rgba(17,24,49,.9); color: var(--text); font-weight: 820; cursor: pointer;
+              }
+              .firebase-google-button { background: linear-gradient(135deg,rgba(59,130,246,.9),rgba(139,92,246,.82)); }
+              .firebase-phone-grid { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+              .firebase-phone-grid input { min-width: 0; width: 100%; }
+              .firebase-code-row { display: none; grid-template-columns: 1fr auto; gap: 8px; }
+              .firebase-code-row.visible { display: grid; }
+              .firebase-auth-divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 9px; }
+              .firebase-auth-divider::before, .firebase-auth-divider::after { content: ''; height: 1px; flex: 1; background: var(--line); }
+              .firebase-auth-message { min-height: 18px; margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+              .firebase-auth-message.error { color: #fecdd3; }
+              .firebase-auth-message.success { color: #b7f7e8; }
+              .firebase-profile { display: none; margin-top: 16px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: rgba(5,8,22,.52); }
+              .firebase-profile.visible { display: grid; gap: 9px; }
+              .firebase-profile-row { display: flex; justify-content: space-between; gap: 15px; color: var(--muted); font-size: 10px; }
+              .firebase-profile-row strong { color: var(--text); text-align: right; overflow-wrap: anywhere; }
+              #firebaseRecaptcha { min-height: 1px; }
+              @media (max-width: 720px) {
+                .firebase-account-button { width: 35px; min-width: 35px; padding: 0; justify-content: center; }
+                .firebase-account-button .account-label { display: none; }
+                .firebase-auth-layer.open { align-items: end; }
+                .firebase-auth-card { width: 100%; max-height: 90dvh; border-radius: 18px 18px 0 0; padding-bottom: max(20px,env(safe-area-inset-bottom)); }
+                .firebase-phone-grid, .firebase-code-row { grid-template-columns: 1fr; }
+              }
+            `;
+            document.head.appendChild(style);
+
+            const accountButton = document.createElement('button');
+            accountButton.id = 'firebaseAccountButton';
+            accountButton.className = 'firebase-account-button';
+            accountButton.type = 'button';
+            accountButton.setAttribute('aria-label', 'Open account sign in');
+            accountButton.innerHTML = '<span class="account-avatar">↗</span><span class="account-label">Sign in</span>';
+
+            const settingsButton = document.getElementById('settingsButton');
+            const actions = settingsButton?.parentElement || document.querySelector('.top-actions');
+            if (settingsButton) actions.insertBefore(accountButton, settingsButton);
+            else actions?.appendChild(accountButton);
+
+            document.body.insertAdjacentHTML('beforeend', `
+              <section class="firebase-auth-layer" id="firebaseAuthLayer" aria-hidden="true">
+                <div class="firebase-auth-backdrop" id="firebaseAuthBackdrop"></div>
+                <div class="firebase-auth-card" role="dialog" aria-modal="true" aria-labelledby="firebaseAuthTitle">
+                  <header>
+                    <div><span class="eyebrow">Traid account</span><h2 id="firebaseAuthTitle">Sign in</h2><p>Use Google or a verified phone number. Trading permissions remain controlled separately by the MT5 operator session.</p></div>
+                    <button class="icon-button" id="firebaseAuthClose" type="button" aria-label="Close account dialog">×</button>
+                  </header>
+                  <div class="firebase-auth-actions" id="firebaseSignedOutActions">
+                    <button class="firebase-google-button" id="firebaseGoogleSignIn" type="button">Continue with Google</button>
+                    <div class="firebase-auth-divider">or use phone</div>
+                    <div class="firebase-phone-grid">
+                      <input id="firebasePhoneNumber" type="tel" autocomplete="tel" inputmode="tel" placeholder="+1 555 555 5555" aria-label="Phone number in international format" />
+                      <button class="firebase-phone-button" id="firebaseSendCode" type="button">Send code</button>
+                    </div>
+                    <div id="firebaseRecaptcha"></div>
+                    <div class="firebase-code-row" id="firebaseCodeRow">
+                      <input id="firebaseVerificationCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" aria-label="Verification code" />
+                      <button class="firebase-phone-button" id="firebaseVerifyCode" type="button">Verify</button>
+                    </div>
+                  </div>
+                  <div class="firebase-profile" id="firebaseProfile">
+                    <div class="firebase-profile-row"><span>Signed in as</span><strong id="firebaseProfileName">—</strong></div>
+                    <div class="firebase-profile-row"><span>Traid ID</span><strong id="firebasePublicUid">Creating…</strong></div>
+                    <div class="firebase-profile-row"><span>Provider</span><strong id="firebaseProvider">—</strong></div>
+                    <button class="firebase-signout-button" id="firebaseSignOut" type="button">Sign out</button>
+                  </div>
+                  <div class="firebase-auth-message" id="firebaseAuthMessage">Firebase is initializing…</div>
+                </div>
+              </section>
+            `);
+
+            const layer = document.getElementById('firebaseAuthLayer');
+            const open = () => { layer.classList.add('open'); layer.setAttribute('aria-hidden', 'false'); };
+            const close = () => { layer.classList.remove('open'); layer.setAttribute('aria-hidden', 'true'); };
+            accountButton.addEventListener('click', open);
+            document.getElementById('firebaseAuthClose').addEventListener('click', close);
+            document.getElementById('firebaseAuthBackdrop').addEventListener('click', close);
+            window.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+          }
+
+          function setMessage(message, type = '') {
+            const node = document.getElementById('firebaseAuthMessage');
+            if (!node) return;
+            node.textContent = message;
+            node.className = `firebase-auth-message ${type}`.trim();
+          }
+
+          async function loadFirebaseConfig() {
+            try {
+              const response = await fetch('/__/firebase/init.json', { cache: 'no-store' });
+              if (response.ok) {
+                const config = await response.json();
+                if (config?.apiKey && config?.projectId) return config;
+              }
+            } catch (_) {
+              // A normal local web server does not provide Firebase Hosting's reserved namespace.
+            }
+
+            try {
+              const local = await import('./firebase-config.local.js');
+              if (local.firebaseConfig?.apiKey && !local.firebaseConfig.apiKey.startsWith('REPLACE_')) {
+                return local.firebaseConfig;
+              }
+            } catch (_) {
+              // Optional local config is intentionally absent in source control.
+            }
+
+            throw new Error('Firebase configuration was not found. Run through Firebase Hosting/emulators or add dashboard/firebase-config.local.js.');
+          }
+
+          function creationDatePrefix(user) {
+            const date = new Date(user.metadata?.creationTime || Date.now());
+            const year = String(date.getUTCFullYear()).slice(-2);
+            const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(date.getUTCDate()).padStart(2, '0');
+            return `${year}${month}${day}`;
+          }
+
+          function randomSuffix(length = PUBLIC_UID_SUFFIX_LENGTH) {
+            const bytes = new Uint8Array(length);
+            crypto.getRandomValues(bytes);
+            return Array.from(bytes, value => PUBLIC_UID_ALPHABET[value % PUBLIC_UID_ALPHABET.length]).join('');
+          }
+
+          function profileValues(user) {
+            return {
+              display_name: user.displayName || null,
+              email: user.email || null,
+              phone_number: user.phoneNumber || null,
+              photo_url: user.photoURL || null,
+              provider_ids: [...new Set((user.providerData || []).map(item => item.providerId).filter(Boolean))],
+            };
+          }
+
+          function initials(user) {
+            const source = user.displayName || user.email || user.phoneNumber || 'U';
+            return source.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase();
+          }
+
+          async function initializeFirebaseAccount() {
+            injectAccountUI();
+
+            const [appModule, authModule, firestoreModule] = await Promise.all([
+              import(sdk('firebase-app')),
+              import(sdk('firebase-auth')),
+              import(sdk('firebase-firestore')),
+            ]);
+            const config = await loadFirebaseConfig();
+            const app = appModule.initializeApp(config);
+            const auth = authModule.getAuth(app);
+            const db = firestoreModule.getFirestore(app);
+            await authModule.setPersistence(auth, authModule.browserLocalPersistence);
+
+            let phoneConfirmation = null;
+            let recaptchaVerifier = null;
+            let activePublicUid = null;
+
+            const ensureUserProfile = async user => {
+              const ref = firestoreModule.doc(db, 'users', user.uid);
+              const values = profileValues(user);
+              activePublicUid = await firestoreModule.runTransaction(db, async transaction => {
+                const snapshot = await transaction.get(ref);
+                if (!snapshot.exists()) {
+                  const publicUid = `${creationDatePrefix(user)}${randomSuffix()}`;
+                  transaction.set(ref, {
+                    auth_uid: user.uid,
+                    public_uid: publicUid,
+                    created_at: firestoreModule.serverTimestamp(),
+                    updated_at: firestoreModule.serverTimestamp(),
+                    last_sign_in_at: firestoreModule.serverTimestamp(),
+                    ...values,
+                    role: 'user',
+                    status: 'active',
+                  });
+                  return publicUid;
+                }
+
+                transaction.update(ref, {
+                  updated_at: firestoreModule.serverTimestamp(),
+                  last_sign_in_at: firestoreModule.serverTimestamp(),
+                  ...values,
+                });
+                return snapshot.data().public_uid;
+              });
+              return activePublicUid;
+            };
+
+            const renderUser = async user => {
+              const button = document.getElementById('firebaseAccountButton');
+              const signedOut = document.getElementById('firebaseSignedOutActions');
+              const profile = document.getElementById('firebaseProfile');
+              if (!user) {
+                activePublicUid = null;
+                button.innerHTML = '<span class="account-avatar">↗</span><span class="account-label">Sign in</span>';
+                signedOut.style.display = 'grid';
+                profile.classList.remove('visible');
+                setMessage('Sign in with Google or phone to create your Traid account record.');
+                return;
+              }
+
+              button.innerHTML = `<span class="account-avatar">${initials(user)}</span><span class="account-label">${user.displayName || user.email || user.phoneNumber || 'Account'}</span>`;
+              signedOut.style.display = 'none';
+              profile.classList.add('visible');
+              document.getElementById('firebaseProfileName').textContent = user.displayName || user.email || user.phoneNumber || user.uid;
+              document.getElementById('firebaseProvider').textContent = (user.providerData || []).map(item => item.providerId.replace('.com', '')).join(', ') || 'Firebase';
+              document.getElementById('firebasePublicUid').textContent = 'Creating…';
+              try {
+                const publicUid = await ensureUserProfile(user);
+                document.getElementById('firebasePublicUid').textContent = publicUid;
+                setMessage('Account is signed in and synchronized with Firestore.', 'success');
+              } catch (error) {
+                document.getElementById('firebasePublicUid').textContent = 'Unavailable';
+                setMessage(error.message || 'Could not create the Firestore account record.', 'error');
+              }
+            };
+
+            authModule.onAuthStateChanged(auth, renderUser);
+            authModule.getRedirectResult(auth).catch(error => setMessage(error.message, 'error'));
+
+            document.getElementById('firebaseGoogleSignIn').addEventListener('click', async () => {
+              setMessage('Opening Google sign-in…');
+              const provider = new authModule.GoogleAuthProvider();
+              provider.setCustomParameters({ prompt: 'select_account' });
+              try {
+                if (window.matchMedia('(max-width: 720px)').matches) {
+                  await authModule.signInWithRedirect(auth, provider);
+                } else {
+                  await authModule.signInWithPopup(auth, provider);
+                }
+              } catch (error) {
+                if (error.code === 'auth/popup-blocked') await authModule.signInWithRedirect(auth, provider);
+                else setMessage(error.message, 'error');
+              }
+            });
+
+            document.getElementById('firebaseSendCode').addEventListener('click', async () => {
+              const phoneNumber = document.getElementById('firebasePhoneNumber').value.trim();
+              if (!/^\+[1-9]\d{7,14}$/.test(phoneNumber.replace(/[\s()-]/g, ''))) {
+                setMessage('Enter the phone number in international format, such as +17135551234.', 'error');
+                return;
+              }
+              const normalized = phoneNumber.replace(/[\s()-]/g, '');
+              try {
+                setMessage('Complete the anti-abuse check, then the verification code will be sent.');
+                if (recaptchaVerifier) recaptchaVerifier.clear();
+                recaptchaVerifier = new authModule.RecaptchaVerifier(auth, 'firebaseRecaptcha', {
+                  size: 'normal',
+                });
+                phoneConfirmation = await authModule.signInWithPhoneNumber(auth, normalized, recaptchaVerifier);
+                document.getElementById('firebaseCodeRow').classList.add('visible');
+                document.getElementById('firebaseVerificationCode').focus();
+                setMessage('Verification code sent.', 'success');
+              } catch (error) {
+                recaptchaVerifier?.clear();
+                recaptchaVerifier = null;
+                setMessage(error.message, 'error');
+              }
+            });
+
+            document.getElementById('firebaseVerifyCode').addEventListener('click', async () => {
+              const code = document.getElementById('firebaseVerificationCode').value.trim();
+              if (!phoneConfirmation) return setMessage('Send a verification code first.', 'error');
+              if (!/^\d{6}$/.test(code)) return setMessage('Enter the 6-digit verification code.', 'error');
+              try {
+                setMessage('Verifying code…');
+                await phoneConfirmation.confirm(code);
+                phoneConfirmation = null;
+                document.getElementById('firebaseCodeRow').classList.remove('visible');
+              } catch (error) {
+                setMessage(error.message, 'error');
+              }
+            });
+
+            document.getElementById('firebaseSignOut').addEventListener('click', async () => {
+              try {
+                await authModule.signOut(auth);
+                setMessage('Signed out.', 'success');
+              } catch (error) {
+                setMessage(error.message, 'error');
+              }
+            });
+
+            window.traidFirebase = {
+              app,
+              auth,
+              db,
+              get currentUser() { return auth.currentUser; },
+              get publicUid() { return activePublicUid; },
+              getIdToken: forceRefresh => auth.currentUser?.getIdToken(Boolean(forceRefresh)) || Promise.resolve(null),
+            };
+          }
+
+          initializeFirebaseAccount().catch(error => {
+            injectAccountUI();
+            setMessage(error.message || 'Firebase initialization failed.', 'error');
+            console.error('Traid Firebase initialization failed:', error);
+          });
+          JS
+
+          cat > FIREBASE.md <<'MD'
+          # Firebase setup for Traid
+
+          Traid is initialized for Firebase Hosting, Firebase Authentication, Cloud Firestore, and the local Firebase Emulator Suite.
+
+          ## Hosting target
+
+          The configured Hosting target is `keitraid`, serving the existing `dashboard/` directory as a single-page app. The default Firebase project alias is also currently `keitraid`.
+
+          If the Firebase project ID and Hosting site ID are not both exactly `keitraid`, run:
+
+          ```bash
+          firebase login
+          firebase use --add
+          firebase target:apply hosting keitraid YOUR_FIREBASE_HOSTING_SITE_ID
+          ```
+
+          This updates `.firebaserc` while preserving `keitraid` as the local deployment target name.
+
+          ## Enable Authentication providers
+
+          In Firebase Console, open **Authentication → Sign-in method** and enable:
+
+          1. Google
+          2. Phone
+
+          Add every production/custom domain to **Authentication → Settings → Authorized domains**. Phone verification SMS requires the Blaze plan and is billed per message. Use Firebase test phone numbers while developing.
+
+          ## Create Firestore
+
+          Create the default Cloud Firestore database in Native mode, then deploy the included restrictive rules and empty index configuration.
+
+          ```bash
+          firebase deploy --only firestore
+          ```
+
+          Each authenticated user owns exactly one document at:
+
+          ```text
+          users/{firebaseAuthUid}
+          ```
+
+          On first sign-in the client creates an immutable `public_uid` with this format:
+
+          ```text
+          YYMMDD + 14 uppercase letters/numbers
+          ```
+
+          The date prefix comes from Firebase Authentication's server-generated account creation timestamp. Example shape: `260801A7M4Q9T2X8K3PL`.
+
+          Firestore rules prevent users from listing profiles, reading another user's profile, changing the public ID, changing creation time, assigning a role, deleting the record, or writing anywhere else.
+
+          ## Firebase web configuration
+
+          On Firebase Hosting and the Firebase Hosting emulator, the dashboard reads project configuration from the reserved endpoint:
+
+          ```text
+          /__/firebase/init.json
+          ```
+
+          This avoids committing project configuration into source control. When running through an unrelated local static server, copy `dashboard/firebase-config.example.js` to `dashboard/firebase-config.local.js` and fill in the web app values. The local file is gitignored.
+
+          ## Local test
+
+          ```bash
+          npm install -g firebase-tools
+          firebase login
+          firebase use keitraid
+          firebase emulators:start
+          ```
+
+          Open the Hosting emulator URL, normally `http://127.0.0.1:5000`.
+
+          ## Deploy
+
+          ```bash
+          firebase deploy --only hosting:keitraid,firestore
+          ```
+
+          ## Security boundary
+
+          Firebase Auth creates the user's Traid application identity. It does **not** grant access to the FastAPI administrator/trader session and does not grant permission to submit MT5 orders. Live-trading authorization remains server-controlled until Firebase ID-token verification and explicit role mapping are intentionally added to the backend.
+          MD
+
+          python - <<'PY'
+          from pathlib import Path
+
+          index_path = Path('dashboard/index.html')
+          html = index_path.read_text(encoding='utf-8')
+          script = '  <script type="module" src="./firebase-auth.js"></script>\n'
+          anchor = '  <script src="./app.js"></script>\n'
+          if script not in html:
+              if anchor not in html:
+                  raise SystemExit('Could not locate app.js script in dashboard/index.html')
+              html = html.replace(anchor, script + anchor, 1)
+              index_path.write_text(html, encoding='utf-8')
+
+          ignore_path = Path('.gitignore')
+          ignore = ignore_path.read_text(encoding='utf-8') if ignore_path.exists() else ''
+          local_config = 'dashboard/firebase-config.local.js'
+          if local_config not in ignore.splitlines():
+              ignore_path.write_text(ignore.rstrip() + '\n' + local_config + '\n', encoding='utf-8')
+
+          section = '''<!-- TRAID_FIREBASE_START -->
+          ## Firebase application accounts
+
+          Firebase is initialized for the `keitraid` Hosting target with Google and phone-number sign-in plus private per-user Firestore profiles. The first successful sign-in creates an immutable Traid public ID composed of the Firebase account creation date (`YYMMDD`) followed by 14 random uppercase letters/numbers. See [`FIREBASE.md`](FIREBASE.md) for provider activation, emulator, security-rule, and deployment instructions.
+
+          Firebase application identity is intentionally separate from the privileged MT5 operator session; signing in with Google or phone does not grant live-trading permission.
+          <!-- TRAID_FIREBASE_END -->'''
+
+          for filename in ('README.md', 'dashboard/README.md'):
+              path = Path(filename)
+              if not path.exists():
+                  continue
+              text = path.read_text(encoding='utf-8')
+              start = '<!-- TRAID_FIREBASE_START -->'
+              end = '<!-- TRAID_FIREBASE_END -->'
+              if start in text and end in text:
+                  before = text.split(start, 1)[0].rstrip()
+                  after = text.split(end, 1)[1].lstrip()
+                  updated = before + '\n\n' + section
+                  if after:
+                      updated += '\n\n' + after
+                  updated += '\n'
+              else:
+                  updated = text.rstrip() + '\n\n' + section + '\n'
+              path.write_text(updated, encoding='utf-8')
+
+          test_path = Path('tests/test_platform.py')
+          test_text = test_path.read_text(encoding='utf-8')
+          test_block = '''\n\ndef test_firebase_hosting_auth_and_identity_contracts() -> None:\n    root = Path(__file__).resolve().parents[1]\n    firebase = json.loads((root / "firebase.json").read_text(encoding="utf-8"))\n    assert firebase["hosting"]["target"] == "keitraid"\n    assert firebase["hosting"]["public"] == "dashboard"\n    assert firebase["firestore"]["rules"] == "firestore.rules"\n\n    html = (root / "dashboard" / "index.html").read_text(encoding="utf-8")\n    auth_js = (root / "dashboard" / "firebase-auth.js").read_text(encoding="utf-8")\n    rules = (root / "firestore.rules").read_text(encoding="utf-8")\n    assert 'type="module" src="./firebase-auth.js"' in html\n    assert "signInWithPhoneNumber" in auth_js\n    assert "GoogleAuthProvider" in auth_js\n    assert "metadata?.creationTime" in auth_js\n    assert "PUBLIC_UID_SUFFIX_LENGTH = 14" in auth_js\n    assert "public_uid" in rules\n    assert "^[0-9]{6}[A-Z0-9]{14}$" in rules\n'''
+          if 'def test_firebase_hosting_auth_and_identity_contracts' not in test_text:
+              test_path.write_text(test_text.rstrip() + test_block + '\n', encoding='utf-8')
+          PY
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          json.loads(Path('firebase.json').read_text())
+          json.loads(Path('.firebaserc').read_text())
+          json.loads(Path('firestore.indexes.json').read_text())
+          assert 'firebase-auth.js' in Path('dashboard/index.html').read_text()
+          PY
+          node --check dashboard/firebase-auth.js
+
+          git rm .github/workflows/apply-firebase.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firebase.json .firebaserc firestore.rules firestore.indexes.json FIREBASE.md .gitignore dashboard/index.html dashboard/firebase-auth.js dashboard/firebase-config.example.js README.md dashboard/README.md tests/test_platform.py
+          git commit -m "Add Firebase hosting Google phone auth and Firestore profiles"
+          git push origin HEAD:main
