@@ -5,12 +5,26 @@ on:
     branches:
       - main
       - "feature/**"
+    paths:
+      - "traid_live/**"
+      - "dashboard/**"
+      - "tests/**"
+      - "requirements-live.txt"
+      - "firebase.json"
+      - ".firebaserc"
+      - "firestore.rules"
+      - "firestore.indexes.json"
+      - ".github/workflows/live-data-ci.yml"
   pull_request:
     paths:
       - "traid_live/**"
       - "dashboard/**"
-      - "tests/test_live_data.py"
+      - "tests/**"
       - "requirements-live.txt"
+      - "firebase.json"
+      - ".firebaserc"
+      - "firestore.rules"
+      - "firestore.indexes.json"
       - ".github/workflows/live-data-ci.yml"
 
 jobs:
@@ -28,16 +42,18 @@ jobs:
         run: python -m pip install -r requirements-live.txt
       - name: Compile live package
         run: python -m compileall -q traid_live
-      - name: Check dashboard JavaScript syntax
-        shell: bash
+      - name: Validate Firebase configuration JSON
         run: |
           python - <<'PY'
+          import json
           from pathlib import Path
 
-          html = Path("dashboard/index.html").read_text(encoding="utf-8")
-          script = html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
-          Path("/tmp/traid-dashboard.js").write_text(script, encoding="utf-8")
+          for filename in ("firebase.json", ".firebaserc", "firestore.indexes.json"):
+              json.loads(Path(filename).read_text(encoding="utf-8"))
           PY
-          node --check /tmp/traid-dashboard.js
+      - name: Check dashboard JavaScript syntax
+        run: |
+          node --check dashboard/app.js
+          node --check dashboard/firebase-auth.js
       - name: Run tests
-        run: python -m pytest -q tests/test_live_data.py
+        run: python -m pytest -q
