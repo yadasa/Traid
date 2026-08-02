@@ -40,6 +40,12 @@ jobs:
 
           app = Path('dashboard/app.js')
           js = app.read_text(encoding='utf-8')
+
+          broken = "forecastVolume.setData(rows.map(row => toVolume(row, 'rgba(139,92,246,.32)'));"
+          fixed = "forecastVolume.setData(rows.map(row => toVolume(row, 'rgba(139,92,246,.32)')));"
+          if broken in js:
+              js = js.replace(broken, fixed, 1)
+
           marker = "const chart = LightweightCharts.createChart($('chart'), {"
           replacement = """let uiWired = false;
 wireUI();
@@ -62,16 +68,18 @@ const chart = LightweightCharts.createChart($('chart'), {"""
               js = js.replace(wire, guarded, 1)
           elif 'if (uiWired) return;' not in js:
               raise SystemExit('wireUI marker was not found')
+
           app.write_text(js, encoding='utf-8')
           PY
 
           node --check dashboard/app.js
           grep -q 'lightweight-charts@5.2.0' dashboard/index.html
           grep -q 'if (uiWired) return' dashboard/app.js
+          grep -q "forecastVolume.setData(rows.map(row => toVolume(row, 'rgba(139,92,246,.32)')));" dashboard/app.js
 
           git rm -f .github/workflows/apply-dashboard-browser-fix.yml .github/workflows/fix-dashboard-controls.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add dashboard/index.html dashboard/app.js
-          git commit -m "Fix inert dashboard controls and pin chart runtime"
+          git commit -m "Fix dashboard syntax and initialize controls safely"
           git push origin HEAD:main
