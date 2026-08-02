@@ -1,3 +1,4 @@
+# Triggered after workflow registration on the default branch.
 name: Apply dashboard browser fix
 
 on:
