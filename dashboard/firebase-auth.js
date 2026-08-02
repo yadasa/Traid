@@ -185,6 +185,15 @@ async function initializeFirebaseAccount() {
   const app = appModule.initializeApp(config);
   const auth = authModule.getAuth(app);
   const db = firestoreModule.getFirestore(app);
+  const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
+  const query = new URLSearchParams(window.location.search);
+  const useFirebaseEmulators = localHostnames.has(window.location.hostname)
+    && (window.location.port === '5000' || query.get('firebaseEmulator') === '1');
+  if (useFirebaseEmulators) {
+    authModule.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    firestoreModule.connectFirestoreEmulator(db, '127.0.0.1', 8080);
+    setMessage('Connected to local Firebase Auth and Firestore emulators.');
+  }
   await authModule.setPersistence(auth, authModule.browserLocalPersistence);
 
   let phoneConfirmation = null;

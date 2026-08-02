@@ -68,7 +68,7 @@ firebase use keitraid
 firebase emulators:start
 ```
 
-Open the Hosting emulator URL, normally `http://127.0.0.1:5000`.
+Open the Hosting emulator URL, normally `http://127.0.0.1:5000`. The dashboard automatically connects to Auth on port `9099` and Firestore on port `8080` when opened through that Hosting emulator. If you intentionally serve the dashboard on another localhost port, append `?firebaseEmulator=1`.
 
 ## Deploy
 
