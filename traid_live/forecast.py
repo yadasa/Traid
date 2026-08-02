@@ -82,12 +82,22 @@ class ForecastEngine:
         x_df = historical[
             ["open", "high", "low", "close", "volume", "amount"]
         ].copy()
-        x_timestamp = historical["timestamp"]
-        y_timestamp = self.provider.future_timestamps(
+        x_timestamp = pd.Series(
+            pd.to_datetime(historical["timestamp"], utc=True),
+            name="timestamp",
+        )
+        future_timestamps = self.provider.future_timestamps(
             symbol=symbol,
             timeframe=params.timeframe,
             last_timestamp=historical["timestamp"].iloc[-1],
             periods=params.pred_len,
+        )
+        # Kronos' time-feature helper uses the pandas Series `.dt` accessor.
+        # Provider implementations commonly return a DatetimeIndex, so normalize
+        # both historical and future timestamps before inference.
+        y_timestamp = pd.Series(
+            pd.to_datetime(future_timestamps, utc=True),
+            name="timestamp",
         )
 
         # Kronos/PyTorch inference is serialized by default. This avoids simultaneous
