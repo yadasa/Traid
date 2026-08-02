@@ -29,6 +29,11 @@ class Settings:
     default_timeframe: str = os.getenv("TRAID_TIMEFRAME", "5m")
     default_lookback: int = int(os.getenv("TRAID_LOOKBACK", "400"))
     default_pred_len: int = int(os.getenv("TRAID_PRED_LEN", "24"))
+    advanced_forecast_default: bool = env_bool(
+        "TRAID_ADVANCED_FORECAST_DEFAULT", False
+    )
+    uncertainty_paths: int = int(os.getenv("TRAID_UNCERTAINTY_PATHS", "7"))
+
     quote_poll_seconds: float = float(
         os.getenv(
             "TRAID_QUOTE_POLL_SECONDS",
@@ -36,6 +41,12 @@ class Settings:
         )
     )
     bar_poll_seconds: float = float(os.getenv("TRAID_BAR_POLL_SECONDS", "2"))
+
+    database_path: str = os.getenv("TRAID_DATABASE_PATH", "data/traid.db")
+    calendar_url: str | None = os.getenv("TRAID_CALENDAR_URL") or None
+    calendar_refresh_minutes: int = int(
+        os.getenv("TRAID_CALENDAR_REFRESH_MINUTES", "15")
+    )
 
     massive_api_key: str | None = os.getenv("MASSIVE_API_KEY")
     massive_base_url: str = os.getenv("MASSIVE_BASE_URL", "https://api.massive.com")
@@ -89,10 +100,18 @@ class Settings:
             raise ValueError("MASSIVE_API_KEY is required when TRAID_PROVIDER=massive.")
         if self.max_context < 2:
             raise ValueError("TRAID_MAX_CONTEXT must be at least 2.")
+        if self.default_lookback < 2:
+            raise ValueError("TRAID_LOOKBACK must be at least 2.")
+        if self.default_pred_len < 1:
+            raise ValueError("TRAID_PRED_LEN must be at least 1.")
+        if not 3 <= self.uncertainty_paths <= 25:
+            raise ValueError("TRAID_UNCERTAINTY_PATHS must be between 3 and 25.")
         if self.quote_poll_seconds < 0.1:
             raise ValueError("TRAID_QUOTE_POLL_SECONDS must be at least 0.1.")
         if self.bar_poll_seconds < 0.5:
             raise ValueError("TRAID_BAR_POLL_SECONDS must be at least 0.5.")
+        if self.calendar_refresh_minutes < 1:
+            raise ValueError("TRAID_CALENDAR_REFRESH_MINUTES must be at least 1.")
         if self.trading_mode not in {"paper", "live"}:
             raise ValueError("TRAID_TRADING_MODE must be 'paper' or 'live'.")
         if self.trading_enabled and self.provider != "mt5":
