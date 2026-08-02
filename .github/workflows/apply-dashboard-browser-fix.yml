@@ -1,0 +1,76 @@
+name: Apply dashboard browser fix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-dashboard-browser-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply browser-only dashboard repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          index = Path('dashboard/index.html')
+          html = index.read_text(encoding='utf-8')
+          old = '<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>'
+          new = '''<script
+    src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"
+    onerror="this.onerror=null;this.src='https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js';">
+  </script>'''
+          if old in html:
+              html = html.replace(old, new, 1)
+          elif 'lightweight-charts@5.2.0' not in html:
+              raise SystemExit('Chart script marker was not found')
+          index.write_text(html, encoding='utf-8')
+
+          app = Path('dashboard/app.js')
+          js = app.read_text(encoding='utf-8')
+          marker = "const chart = LightweightCharts.createChart($('chart'), {"
+          replacement = """let uiWired = false;
+wireUI();
+
+if (!window.LightweightCharts) {
+  setFeed(false, 'Chart library did not load');
+  toast('The chart library could not be loaded. Settings and login remain available. Check the browser console, internet connection, or content-blocking extensions, then refresh.', 'error');
+  throw new Error('LightweightCharts failed to load from both configured CDNs.');
+}
+
+const chart = LightweightCharts.createChart($('chart'), {"""
+          if marker in js and 'let uiWired = false;' not in js:
+              js = js.replace(marker, replacement, 1)
+          elif 'let uiWired = false;' not in js:
+              raise SystemExit('Chart initialization marker was not found')
+
+          wire = "function wireUI(){\n  $('symbolSelect').value=state.symbol;"
+          guarded = "function wireUI(){\n  if (uiWired) return;\n  uiWired = true;\n  $('symbolSelect').value=state.symbol;"
+          if wire in js:
+              js = js.replace(wire, guarded, 1)
+          elif 'if (uiWired) return;' not in js:
+              raise SystemExit('wireUI marker was not found')
+          app.write_text(js, encoding='utf-8')
+          PY
+
+          node --check dashboard/app.js
+          grep -q 'lightweight-charts@5.2.0' dashboard/index.html
+          grep -q 'if (uiWired) return' dashboard/app.js
+
+          git rm -f .github/workflows/apply-dashboard-browser-fix.yml .github/workflows/fix-dashboard-controls.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dashboard/index.html dashboard/app.js
+          git commit -m "Fix inert dashboard controls and pin chart runtime"
+          git push origin HEAD:main
