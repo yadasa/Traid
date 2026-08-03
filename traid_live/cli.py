@@ -44,11 +44,8 @@ def main() -> None:
     if args.command == "serve":
         import uvicorn
 
-        from .websocket_guard import install_websocket_disconnect_guard
-
-        install_websocket_disconnect_guard()
         uvicorn.run(
-            "traid_live.service:app",
+            "traid_live.service_patch:app",
             host=args.host,
             port=args.port,
             reload=args.reload,
