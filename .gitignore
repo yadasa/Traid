@@ -68,6 +68,7 @@ ENV/
 env.bak/
 venv.bak/
 data/trailing_stops.json
+.traid-runtime.json
 
 # Temporary files
 *.tmp
