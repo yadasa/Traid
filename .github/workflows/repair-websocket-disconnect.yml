@@ -1,0 +1,71 @@
+name: Repair WebSocket Disconnect Handling
+
+on:
+  push:
+    paths:
+      - .github/workflows/repair-websocket-disconnect.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch disconnect handling
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("traid_live/service.py")
+          source = path.read_text(encoding="utf-8")
+
+          old = '''            except Exception as exc:
+                await websocket.send_json({"type": "error", "detail": str(exc)})
+            await asyncio.sleep(max(0.05, quote_poll - (time.monotonic() - loop_started)))
+    except WebSocketDisconnect:
+        if forecast_task:
+            forecast_task.cancel()
+'''
+
+          new = '''            except (WebSocketDisconnect, RuntimeError):
+                # The browser intentionally closes the previous stream when the
+                # symbol or timeframe changes. Do not attempt another send after
+                # Starlette has reported that the socket is already closed.
+                break
+            except Exception as exc:
+                try:
+                    await websocket.send_json({"type": "error", "detail": str(exc)})
+                except (WebSocketDisconnect, RuntimeError):
+                    break
+            await asyncio.sleep(max(0.05, quote_poll - (time.monotonic() - loop_started)))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if forecast_task:
+            forecast_task.cancel()
+'''
+
+          if old not in source:
+              raise SystemExit("Expected WebSocket block was not found; refusing an unsafe patch.")
+
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+          # Remove this one-time workflow from the resulting commit.
+          Path(".github/workflows/repair-websocket-disconnect.yml").unlink()
+
+      - name: Validate Python syntax
+        run: python -m py_compile traid_live/service.py
+
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add traid_live/service.py .github/workflows/repair-websocket-disconnect.yml
+          git commit -m "Handle intentional WebSocket disconnects cleanly"
+          git push origin HEAD:main
