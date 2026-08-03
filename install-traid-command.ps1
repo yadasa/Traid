@@ -34,8 +34,10 @@ function traid {
 $endMarker
 "@
 
-$profileText = Get-Content $ProfilePath -Raw
-$pattern = "(?s)\r?\n?$([regex]::Escape($startMarker)).*?$([regex]::Escape($endMarker))\r?\n?"
+$profileText = [string](Get-Content $ProfilePath -Raw -ErrorAction SilentlyContinue)
+$escapedStart = [regex]::Escape($startMarker)
+$escapedEnd = [regex]::Escape($endMarker)
+$pattern = "(?s)\r?\n?$escapedStart.*?$escapedEnd\r?\n?"
 $profileText = [regex]::Replace($profileText, $pattern, "`r`n")
 $profileText = $profileText.TrimEnd() + "`r`n`r`n" + $block.Trim() + "`r`n"
 Set-Content -Path $ProfilePath -Value $profileText -Encoding UTF8
