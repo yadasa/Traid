@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 
 
-NEW_YORK = ZoneInfo("America/New_York")
-UTC = ZoneInfo("UTC")
+try:
+    NEW_YORK = ZoneInfo("America/New_York")
+except ZoneInfoNotFoundError:
+    # Modern pandas installations on Windows normally include tzdata. Keep the
+    # server bootable on stripped-down environments; only DST precision is lost.
+    NEW_YORK = timezone(timedelta(hours=-5))
 
-# Common ICT-style New York clock windows. These convert through IANA time zones,
-# so daylight-saving transitions do not shift the chart context by an hour.
+# Common ICT-style New York clock windows. IANA data are used when available, so
+# daylight-saving transitions do not shift the chart context by an hour.
 _SESSION_WINDOWS = {
     "asian": (time(20, 0), time(0, 0), -1),
     "london": (time(2, 0), time(5, 0), 0),
