@@ -25,6 +25,11 @@ from . import trajectory_integrity as _trajectory_integrity  # noqa: F401,E402
 # 1h/15m/5m hierarchy, and calibrate confidence by market context.
 from . import ict_runtime as _ict_runtime  # noqa: F401,E402
 
+# Reuse ICT forecasts safely within the same candle while invalidating them when
+# higher-timeframe context changes. Blend the deterministic context model with a
+# compact classifier learned from Traid's own realized forecast outcomes.
+from . import ict_runtime_patch as _ict_runtime_patch  # noqa: F401,E402
+
 # Poll and publish the latest MT5 quote independently from model inference,
 # scoring, candle-boundary checks, and multi-timeframe analysis. The live candle
 # close is forced to the exact quote price in the same WebSocket payload.
