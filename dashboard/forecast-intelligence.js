@@ -31,6 +31,7 @@
         .forecast-confidence-pill.high { color:#99f6e4; border-color:rgba(45,212,191,.35); background:rgba(13,78,69,.30); }
         .forecast-confidence-pill.medium { color:#fde68a; border-color:rgba(245,158,11,.32); background:rgba(120,53,15,.28); }
         .forecast-confidence-pill.low { color:#fecdd3; border-color:rgba(251,113,133,.34); background:rgba(127,29,29,.26); }
+        .forecast-confidence-pill.calibrating { color:#bfdbfe; border-color:rgba(96,165,250,.30); background:rgba(30,64,175,.20); }
 
         .forecast-intelligence-overlay {
           position:absolute; left:12px; right:12px; bottom:12px; z-index:4;
@@ -117,46 +118,62 @@
 
   function renderConfidence(confidence) {
     installUI();
-    if (!confidence) return;
+    const pill = document.getElementById('forecastConfidencePill');
+    if (!pill || !confidence) return;
+
+    if (confidence.available === false || confidence.calibrated === false) {
+      const count = Number(confidence.independent_forecasts) || 0;
+      const required = Number(confidence.required_forecasts) || 30;
+      pill.className = 'forecast-confidence-pill visible calibrating';
+      pill.textContent = `CALIBRATING ${count}/${required}`;
+      pill.title = [
+        'No confidence percentage is shown until enough independent realized forecasts exist.',
+        `Market: ${confidence.symbol || '—'} ${confidence.timeframe || '—'}`,
+        `Horizon: candle ${confidence.horizon || '—'}`,
+        `Regime: ${confidence.regime || 'unknown'}`,
+        `Independent forecasts: ${count}/${required}`,
+      ].join('\n');
+      return;
+    }
+
     const score = Number(confidence.score_pct);
     if (!Number.isFinite(score)) return;
-
-    const grade = confidence.grade || (score >= 70 ? 'high' : score >= 58 ? 'medium' : 'low');
-    const pill = document.getElementById('forecastConfidencePill');
-    if (!pill) return;
+    const grade = confidence.grade || (score >= 65 ? 'high' : score >= 55 ? 'medium' : 'low');
+    const components = confidence.components || {};
+    const vote = confidence.path_vote || {};
 
     pill.className = `forecast-confidence-pill visible ${grade}`;
     pill.textContent = `CONFIDENCE ${number(score, 0)}%`;
-    const components = confidence.components || {};
     pill.title = [
-      `Model confidence: ${number(score, 1)}% (${grade})`,
-      `Samples: ${confidence.sample_count ?? NORMAL_SAMPLES}`,
-      `Paths: ${confidence.paths ?? 1}`,
-      `Path agreement: ${number(components.path_agreement_pct, 1)}%`,
-      `Forecast stability: ${number(components.stability_pct, 1)}%`,
-      `Historical direction: ${number(components.historical_accuracy_pct, 1)}%`,
-      'Confidence is a decision-quality score, not a guaranteed win probability.',
+      `Calibrated confidence: ${number(score, 1)}% (${grade})`,
+      `Independent forecasts: ${confidence.independent_forecasts ?? '—'}`,
+      `Market/regime: ${confidence.symbol || '—'} ${confidence.timeframe || '—'} · ${confidence.regime || 'unknown'}`,
+      `Horizon: candle ${confidence.horizon || '—'}`,
+      `Direction accuracy: ${number(components.direction_accuracy_pct, 1)}%`,
+      `Distance accuracy: ${number(components.distance_accuracy_pct, 1)}%`,
+      `Current path vote: ${String(vote.direction || 'unknown').toUpperCase()} ${number(vote.agreement_pct, 1)}%`,
+      `Paths: ${confidence.paths ?? confidence.sample_count ?? NORMAL_SAMPLES}`,
     ].join('\n');
   }
 
-  function renderContext(payload) {
+  function renderMarketContext(context = {}, gate = null) {
     installUI();
-    const multi = payload?.multi_timeframe;
-    if (!multi) return;
-
     const overlay = document.getElementById('forecastIntelligenceOverlay');
     if (overlay) overlay.classList.add('visible');
 
-    const context = multi.market_context || {};
     const trend = context.trend || {};
     const range = context.range || {};
     const volatility = context.volatility || {};
+    const breakout = context.breakout || {};
 
     const trendTone = trend.direction === 'bullish' ? 'positive' : trend.direction === 'bearish' ? 'negative' : 'warning';
+    const breakoutText = breakout.active
+      ? `${String(breakout.direction || '').toUpperCase()} BREAKOUT ${number(breakout.score_pct, 0)}%`
+      : `${String(context.regime || 'unknown').toUpperCase()} regime`;
     setCard(
       'trendContextCard', 'trendContextValue', 'trendContextDetail',
       `${String(trend.direction || 'unknown').toUpperCase()} · ${number(trend.strength_pct, 0)}%`,
-      `${String(context.regime || 'unknown').toUpperCase()} regime`, trendTone,
+      breakoutText, trendTone,
     );
 
     const rangeTone = String(range.state || '').includes('upper') ? 'positive' : String(range.state || '').includes('lower') ? 'negative' : '';
@@ -173,15 +190,34 @@
       `ATR ${number(volatility.atr_pct, 3)}% · relative ${number(volatility.relative_pct, 0)}%`, volatilityTone,
     );
 
+    if (gate?.applied) {
+      const status = gate.trade_allowed ? 'GATED · FILTERED' : 'NO TRADE · GATED';
+      setCard(
+        'alignmentContextCard', 'alignmentContextValue', 'alignmentContextDetail',
+        status,
+        `${String(gate.raw_vote_direction || 'unknown').toUpperCase()} vote ${number(gate.raw_vote_pct, 0)}% · ${gate.selected_paths || 0}/${gate.total_paths || 0} paths`,
+        gate.trade_allowed ? 'warning' : 'negative',
+      );
+    }
+  }
+
+  function renderContext(payload) {
+    installUI();
+    const multi = payload?.multi_timeframe;
+    if (!multi) return;
+
+    renderMarketContext(multi.market_context || {});
     const readings = (multi.readings || [])
       .map(item => `${item.timeframe} ${String(item.direction || '?').slice(0, 4).toUpperCase()}`)
       .join(' · ');
-    const alignmentTone = multi.aligned ? 'positive' : multi.contradiction ? 'negative' : 'warning';
-    const alignmentValue = multi.aligned
+    const alignmentTone = multi.trade_allowed ? 'positive' : multi.contradiction ? 'negative' : 'warning';
+    const alignmentValue = multi.trade_allowed
       ? `${String(multi.trade_bias || multi.consensus).toUpperCase()} · ${number(multi.agreement_pct, 0)}%`
       : multi.contradiction
         ? 'NO TRADE · CONFLICT'
-        : 'WAIT · INCOMPLETE';
+        : multi.complete
+          ? 'NO TRADE · MIXED'
+          : 'WAIT · INCOMPLETE';
     setCard(
       'alignmentContextCard', 'alignmentContextValue', 'alignmentContextDetail',
       alignmentValue, readings || '5m · 15m · 1h', alignmentTone,
@@ -189,15 +225,31 @@
 
     const existingConsensus = document.getElementById('timeframeConsensus');
     const existingAgreement = document.getElementById('timeframeAgreement');
-    if (existingConsensus) existingConsensus.textContent = multi.aligned ? String(multi.trade_bias).toUpperCase() : 'NO TRADE';
+    if (existingConsensus) existingConsensus.textContent = multi.trade_allowed ? String(multi.trade_bias).toUpperCase() : 'NO TRADE';
     if (existingAgreement) existingAgreement.textContent = `5m/15m/1h · ${number(multi.agreement_pct, 0)}% aligned`;
   }
 
   function inspectPayload(payload) {
     if (!payload || typeof payload !== 'object') return;
-    const confidence = payload.confidence || payload.revision?.model_confidence || payload.uncertainty?.confidence;
-    if (confidence && Array.isArray(payload.projection) && payload.projection.length) renderConfidence(confidence);
+    const hasProjection = Array.isArray(payload.projection) && payload.projection.length > 0;
+    const revision = payload.revision || {};
+    const confidence = payload.confidence || revision.model_confidence || payload.uncertainty?.confidence;
+    if (hasProjection && confidence) renderConfidence(confidence);
+    if (hasProjection && revision.market_context) {
+      renderMarketContext(revision.market_context, revision.regime_gate || payload.regime_gate);
+    }
     if (payload.multi_timeframe) renderContext(payload);
+  }
+
+  function isInitialForecastHistory(url, init) {
+    if (String(init?.method || 'GET').toUpperCase() !== 'GET') return false;
+    try {
+      const parsed = new URL(url, window.location.href);
+      return parsed.pathname.includes('/v1/forecasts/')
+        && parsed.searchParams.get('limit') === '25';
+    } catch (_) {
+      return false;
+    }
   }
 
   window.fetch = async (input, init = {}) => {
@@ -222,9 +274,26 @@
 
     const response = await nativeFetch(input, nextInit);
     const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      response.clone().json().then(inspectPayload).catch(() => {});
-    }
+    if (!contentType.includes('application/json')) return response;
+
+    try {
+      const payload = await response.clone().json();
+      inspectPayload(payload);
+
+      // Do not let the dashboard bypass the intrabar-aware server request with
+      // a completed-candle-only cached forecast. The backend performs safe
+      // one-per-forming-candle deduplication across tabs.
+      if (response.ok && isInitialForecastHistory(url, init)) {
+        return new Response(
+          JSON.stringify({ ...payload, forecasts: [] }),
+          {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+          },
+        );
+      }
+    } catch (_) {}
     return response;
   };
 
@@ -251,6 +320,7 @@
     advancedPaths: ADVANCED_PATHS,
     renderConfidence,
     renderContext,
+    renderMarketContext,
     reset,
   };
 
