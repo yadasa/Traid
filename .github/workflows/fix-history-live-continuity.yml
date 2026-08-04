@@ -1,0 +1,109 @@
+name: Fix History Live Continuity
+
+on:
+  push:
+    paths:
+      - .github/workflows/fix-history-live-continuity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Add continuity backfill guard
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("dashboard/chart-enhancements-runtime.js")
+          source = path.read_text(encoding="utf-8")
+          marker = "\ninstallChartEnhancements();\n"
+          if marker not in source:
+              raise SystemExit("Chart enhancement install marker was not found.")
+
+          patch = r'''
+let historyContinuitySyncInFlight = false;
+let historyContinuityTimer = null;
+
+async function syncCompletedHistoryToLive({ force = false } = {}) {
+  if (historyContinuitySyncInFlight) return;
+
+  const symbol = state.symbol;
+  const timeframe = state.timeframe;
+  const requestId = state.marketRequestId;
+  const expectedSeconds = TIMEFRAME_SECONDS[timeframe] || 60;
+  const completedTime = Number(state.lastCompletedCandleTime || 0);
+  const liveTime = Number(state.currentCandleTime || 0);
+
+  // Adjacent completed/live bars differ by exactly one timeframe. Anything
+  // larger means an older forecast snapshot has overwritten newer history.
+  const hasGap = completedTime > 0 && liveTime > 0
+    && liveTime - completedTime > expectedSeconds * 1.1;
+  if (!force && !hasGap) return;
+
+  historyContinuitySyncInFlight = true;
+  try {
+    const payload = await api(
+      `/v1/candles/${symbol}?timeframe=${timeframe}&limit=400`,
+    );
+    if (!currentMarketRequest(requestId, symbol, timeframe)) return;
+
+    const rows = Array.isArray(payload?.candles) ? payload.candles : [];
+    if (!rows.length || !rowsMatchTimeframe(rows, timeframe)) return;
+
+    const latestCompletedTime = toTime(rows.at(-1)?.timestamp);
+    if (!Number.isFinite(latestCompletedTime)) return;
+
+    // Never replace newer chart history with an older response.
+    if (latestCompletedTime < Number(state.lastCompletedCandleTime || 0)) return;
+
+    setHistory(rows);
+    renderPriorForecasts();
+    positionForecastBoundary();
+  } catch (error) {
+    console.warn('Could not backfill completed candles.', error);
+  } finally {
+    historyContinuitySyncInFlight = false;
+  }
+}
+
+function installHistoryContinuityGuard() {
+  if (historyContinuityTimer) return;
+
+  // Initial backfill replaces any stale history bundled with a cached forecast.
+  setTimeout(() => syncCompletedHistoryToLive({ force: true }), 500);
+
+  // Thereafter, call the endpoint only when a genuine missing-bar gap appears.
+  historyContinuityTimer = setInterval(
+    () => syncCompletedHistoryToLive(),
+    1250,
+  );
+}
+'''
+
+          source = source.replace(
+              marker,
+              f"\n{patch}\ninstallChartEnhancements();\ninstallHistoryContinuityGuard();\n",
+              1,
+          )
+          path.write_text(source, encoding="utf-8")
+
+          Path(".github/workflows/fix-history-live-continuity.yml").unlink()
+
+      - name: Validate JavaScript
+        run: node --check dashboard/chart-enhancements-runtime.js
+
+      - name: Commit continuity fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dashboard/chart-enhancements-runtime.js .github/workflows/fix-history-live-continuity.yml
+          git commit -m "Keep completed history continuous with live candle"
+          git push origin HEAD:main
