@@ -1,5 +1,6 @@
 (() => {
-  const scriptUrl = new URL('./app.js', document.currentScript.src);
+  const loaderUrl = document.currentScript.src;
+  const scriptUrl = new URL('./app.js', loaderUrl);
 
   const fail = error => {
     console.error('Traid dashboard loader failed', error);
@@ -17,15 +18,28 @@
     return `${source.slice(0, start)}${replacement}${source.slice(end)}`;
   };
 
-  fetch(scriptUrl, { cache: 'no-store' })
-    .then(response => {
+  const loadIntelligence = () => new Promise((resolve, reject) => {
+    if (window.TraidForecastIntelligence) {
+      resolve();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = new URL('./forecast-intelligence.js', loaderUrl).href;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Could not load forecast-intelligence.js'));
+    document.head.appendChild(script);
+  });
+
+  Promise.all([
+    fetch(scriptUrl, { cache: 'no-store' }).then(response => {
       if (!response.ok) throw new Error(`Could not load app.js (${response.status})`);
       return response.text();
-    })
-    .then(original => {
+    }),
+    loadIntelligence(),
+  ])
+    .then(([original]) => {
       let source = original;
 
-      // Repair the historical forecast-volume parenthesis typo when an older checkout still has it.
       source = source.replace(
         "forecastVolume.setData(rows.map(row => toVolume(row, 'rgba(139,92,246,.32)'));",
         "forecastVolume.setData(rows.map(row => toVolume(row, 'rgba(139,92,246,.32)')));"
@@ -100,9 +114,7 @@ function currentMarketRequest(requestId, symbol, timeframe) {
     console.warn('Ignored an out-of-order live candle.', { candleTime, currentCandleTime: state.currentCandleTime });
     return false;
   }
-  if (state.lastCompletedCandleTime && candleTime <= state.lastCompletedCandleTime) {
-    return false;
-  }
+  if (state.lastCompletedCandleTime && candleTime <= state.lastCompletedCandleTime) return false;
   state.currentCandleTime = candleTime;
   liveCandles.setData([toCandle(row)]); liveLine.setData([toLine(row)]);
   marketVolume.update(toVolume(row, +row.close >= +row.open ? 'rgba(34,211,238,.24)' : 'rgba(56,189,248,.22)'));
@@ -195,7 +207,7 @@ function currentMarketRequest(requestId, symbol, timeframe) {
   const requestedTimeframe = state.timeframe;
   const advanced = $('advancedForecast').checked;
   const predLen = Math.max(1, +$('predLen').value || 24);
-  const uncertaintyPaths = advanced ? Math.max(3, +$('uncertaintyPaths').value || 7) : null;
+  const uncertaintyPaths = advanced ? Math.max(14, +$('uncertaintyPaths').value || 14) : null;
 
   if (state.socket) {
     const priorSocket = state.socket;
@@ -224,7 +236,7 @@ function currentMarketRequest(requestId, symbol, timeframe) {
       const parameters = item.parameters || {};
       const sameInput = inputLastTimestamp && sameTimestamp(item.input_last_timestamp, inputLastTimestamp);
       const sameModel = !health.model || item.model_id === health.model;
-      const sameParameters = +parameters.lookback === 400 && +parameters.pred_len === predLen && +parameters.sample_count === 5;
+      const sameParameters = +parameters.lookback === 400 && +parameters.pred_len === predLen && +parameters.sample_count === 10;
       const sameMode = advanced ? Boolean(item.uncertainty) && +item.uncertainty.paths === uncertaintyPaths : !item.uncertainty;
       return sameInput && sameModel && sameParameters && sameMode && rowsMatchTimeframe(item.projection, requestedTimeframe);
     });
@@ -242,6 +254,7 @@ function currentMarketRequest(requestId, symbol, timeframe) {
         accuracy: forecastHistory.accuracy,
         reused: true,
       };
+      window.TraidForecastIntelligence?.renderConfidence(payload.confidence || payload.revision?.model_confidence);
     } else {
       payload = await api('/v1/forecast', {
         method: 'POST',
@@ -250,7 +263,7 @@ function currentMarketRequest(requestId, symbol, timeframe) {
           timeframe: requestedTimeframe,
           lookback: 400,
           pred_len: predLen,
-          sample_count: 5,
+          sample_count: 10,
           advanced,
           uncertainty_paths: uncertaintyPaths,
         }),
@@ -318,6 +331,7 @@ function currentMarketRequest(requestId, symbol, timeframe) {
       }
       state.currentForecastId = message.id;
       setProjection(message.projection, message.uncertainty, message.revision, message.generated_at);
+      window.TraidForecastIntelligence?.renderConfidence(message.confidence || message.revision?.model_confidence || message.uncertainty?.confidence);
       renderAccuracy(message.accuracy); loadContext(symbol, timeframe, requestId);
     } else if (message.type === 'forecast_status') {
       $('forecastStatus').textContent = 'Refreshing queued forecast…';
@@ -346,7 +360,10 @@ function currentMarketRequest(requestId, symbol, timeframe) {
         `async function loadContext(symbol = state.symbol, timeframe = state.timeframe, requestId = state.marketRequestId) {
   try {
     const payload = await api(\`/v1/forecast-context/\${symbol}?timeframe=\${timeframe}\`);
-    if (currentMarketRequest(requestId, symbol, timeframe)) renderContext(payload);
+    if (currentMarketRequest(requestId, symbol, timeframe)) {
+      renderContext(payload);
+      window.TraidForecastIntelligence?.renderContext(payload);
+    }
   } catch {}
 }`
       );
