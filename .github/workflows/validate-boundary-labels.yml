@@ -1,0 +1,30 @@
+name: Validate Forecast Boundary Labels
+
+on:
+  push:
+    paths:
+      - .github/workflows/validate-boundary-labels.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate JavaScript syntax
+        run: node --check dashboard/chart-enhancements-runtime.js
+
+      - name: Remove one-time validator
+        run: |
+          rm .github/workflows/validate-boundary-labels.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/validate-boundary-labels.yml
+          git commit -m "Remove completed boundary label validator"
+          git push origin HEAD:main
