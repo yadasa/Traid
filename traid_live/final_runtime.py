@@ -30,6 +30,10 @@ from . import ict_runtime as _ict_runtime  # noqa: F401,E402
 # compact classifier learned from Traid's own realized forecast outcomes.
 from . import ict_runtime_patch as _ict_runtime_patch  # noqa: F401,E402
 
+# Build hierarchy context without generating a second normal forecast when a
+# fresh Advanced forecast already exists for the same candle.
+from . import ict_consensus_runtime as _ict_consensus_runtime  # noqa: F401,E402
+
 # Poll and publish the latest MT5 quote independently from model inference,
 # scoring, candle-boundary checks, and multi-timeframe analysis. The live candle
 # close is forced to the exact quote price in the same WebSocket payload.
