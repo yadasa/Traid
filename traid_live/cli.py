@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     forecast.add_argument("--temperature", type=float, default=1.0)
     forecast.add_argument("--top-p", type=float, default=0.9)
     forecast.add_argument("--top-k", type=int, default=0)
-    forecast.add_argument("--sample-count", type=int, default=5)
+    forecast.add_argument("--sample-count", type=int, default=10)
     forecast.add_argument("--output", help="Optional JSON output path")
 
     serve = subparsers.add_parser("serve", help="Run the FastAPI service")
@@ -45,7 +45,7 @@ def main() -> None:
         import uvicorn
 
         uvicorn.run(
-            "traid_live.service_patch:app",
+            "traid_live.service_runtime:app",
             host=args.host,
             port=args.port,
             reload=args.reload,
