@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from . import intelligence_v2 as v2
 from . import ict_context as context_engine
 from . import ict_runtime as runtime
 from . import trajectory_integrity as trajectory
+from .forecast import ForecastParameters
+from .platform import ForecastPlatform
 from .ict_context import ICT_VERSION
 from .ict_learning import adaptive_context_model
 from .ict_sessions import session_levels, session_name
@@ -13,6 +16,7 @@ from .ict_sessions import session_levels, session_name
 
 _ORIGINAL_MARKET_CONTEXT = runtime.market_context_with_ict
 _RAW_MATCHING_CACHE = trajectory._ORIGINAL_MATCHING_CACHE
+_ICT_GENERATE = ForecastPlatform.generate
 
 
 def _signature(context: dict[str, Any] | None) -> str | None:
@@ -88,6 +92,42 @@ def matching_cache_with_context_identity(*args: Any, **kwargs: Any) -> dict[str,
     return cached
 
 
+def generate_with_fresh_hierarchy(
+    self: ForecastPlatform,
+    params: ForecastParameters,
+    *,
+    advanced: bool = False,
+    paths: int | None = None,
+) -> dict[str, Any]:
+    canonical = str(params.symbol).upper()
+    auxiliary: tuple[str, ...]
+    if params.timeframe == "5m":
+        auxiliary = ("1h", "15m")
+    elif params.timeframe == "15m":
+        auxiliary = ("1h",)
+    else:
+        auxiliary = ()
+
+    for timeframe in auxiliary:
+        helper = replace(
+            params,
+            symbol=canonical,
+            timeframe=timeframe,
+            pred_len=max(int(params.pred_len), 12),
+            sample_count=v2.NORMAL_SAMPLE_COUNT,
+        )
+        # Call the ICT generator directly. 1h is built first; the subsequent 15m
+        # context therefore sees it, and the selected 5m context sees both.
+        _ICT_GENERATE(self, helper, advanced=False, paths=None)
+
+    return _ICT_GENERATE(
+        self,
+        replace(params, symbol=canonical),
+        advanced=advanced,
+        paths=paths,
+    )
+
+
 # The analysis function resolves these module globals dynamically. Replacing them
 # upgrades both session labels and session liquidity highs/lows without modifying
 # the model's OHLC input contract.
@@ -96,3 +136,4 @@ context_engine._session_levels = session_levels
 runtime._BASE_MATCHING_CACHE = _RAW_MATCHING_CACHE
 v2._market_context = market_context_with_adaptive_classifier
 v2._matching_cache = matching_cache_with_context_identity
+ForecastPlatform.generate = generate_with_fresh_hierarchy  # type: ignore[method-assign]
