@@ -11,9 +11,13 @@ from . import multitab_runtime as _multitab_runtime  # noqa: F401,E402
 # requiring every open browser tab to be refreshed.
 from . import multitab_resilience as _multitab_resilience  # noqa: F401,E402
 
-# Replace averaged Kronos output with preserved path voting, intrabar inputs,
-# price-only index features, regime gating, strict 5m/15m/1h alignment, and
-# regime-specific empirical confidence calibration.
+# Preserve Kronos paths, include intrabar input, use price-only index features,
+# gate countertrend trades, align 5m/15m/1h, and calibrate confidence.
 from . import intelligence_v2 as _intelligence_v2  # noqa: F401,E402
+
+# Never replace blocked Kronos output with a hand-authored smooth continuation
+# curve. Display one real sampled medoid trajectory and keep the regime gate as a
+# trade decision only.
+from . import trajectory_integrity as _trajectory_integrity  # noqa: F401,E402
 
 __all__ = ["app"]
