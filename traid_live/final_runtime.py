@@ -20,4 +20,9 @@ from . import intelligence_v2 as _intelligence_v2  # noqa: F401,E402
 # trade decision only.
 from . import trajectory_integrity as _trajectory_integrity  # noqa: F401,E402
 
+# Poll and publish the latest MT5 quote independently from model inference,
+# scoring, candle-boundary checks, and multi-timeframe analysis. The live candle
+# close is forced to the exact quote price in the same WebSocket payload.
+from . import live_priority_runtime as _live_priority_runtime  # noqa: F401,E402
+
 __all__ = ["app"]
