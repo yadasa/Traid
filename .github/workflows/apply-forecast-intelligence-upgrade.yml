@@ -1,0 +1,91 @@
+name: Apply Forecast Intelligence Upgrade
+
+on:
+  push:
+    paths:
+      - .github/workflows/apply-forecast-intelligence-upgrade.yml
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch defaults and dashboard loader
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path, old, new, count=None):
+              file = Path(path)
+              source = file.read_text(encoding='utf-8')
+              occurrences = source.count(old)
+              if occurrences == 0:
+                  raise SystemExit(f'Marker not found in {path}: {old!r}')
+              if count is not None and occurrences != count:
+                  raise SystemExit(f'Expected {count} occurrence(s) in {path}, found {occurrences}: {old!r}')
+              file.write_text(source.replace(old, new), encoding='utf-8')
+
+          loader = Path('dashboard/app-loader.js')
+          source = loader.read_text(encoding='utf-8')
+          marker = """      return response.text();
+            })
+            .then(original => {
+          """
+          replacement = """      return response.text();
+            })
+            .then(original => new Promise((resolve, reject) => {
+              if (window.TraidForecastIntelligence) {
+                resolve(original);
+                return;
+              }
+              const intelligence = document.createElement('script');
+              intelligence.src = new URL('./forecast-intelligence.js', document.currentScript?.src || scriptUrl).href;
+              intelligence.onload = () => resolve(original);
+              intelligence.onerror = () => reject(new Error('Could not load forecast-intelligence.js'));
+              document.head.appendChild(intelligence);
+            }))
+            .then(original => {
+          """
+          if marker not in source:
+              raise SystemExit('App-loader insertion marker was not found.')
+          source = source.replace(marker, replacement, 1)
+          source = source.replace("+$('uncertaintyPaths').value || 7", "+$('uncertaintyPaths').value || 14")
+          source = source.replace("+parameters.sample_count === 5", "+parameters.sample_count === 10")
+          source = source.replace("sample_count: 5,", "sample_count: 10,")
+          loader.write_text(source, encoding='utf-8')
+
+          replace('traid_live/config.py', 'os.getenv("TRAID_UNCERTAINTY_PATHS", "7")', 'os.getenv("TRAID_UNCERTAINTY_PATHS", "14")', 1)
+          replace('traid_live/platform.py', '"uncertainty_paths": 7,', '"uncertainty_paths": 14,', 1)
+          replace('traid_live/platform.py', 'self.store.get_setting("uncertainty_paths", 7)', 'self.store.get_setting("uncertainty_paths", 14)', 1)
+          replace('traid_live/service.py', 'sample_count: int = Field(default=5, ge=1, le=100)', 'sample_count: int = Field(default=10, ge=1, le=100)', 1)
+          replace('traid_live/cli.py', 'forecast.add_argument("--sample-count", type=int, default=5)', 'forecast.add_argument("--sample-count", type=int, default=10)', 1)
+          replace('dashboard/index.html', 'id="uncertaintyPaths" type="number" min="3" max="25" value="7"', 'id="uncertaintyPaths" type="number" min="3" max="25" value="14"', 1)
+
+          app = Path('dashboard/app.js')
+          app_source = app.read_text(encoding='utf-8')
+          app_source = app_source.replace("+$('uncertaintyPaths').value || 7", "+$('uncertaintyPaths').value || 14")
+          app_source = app_source.replace("sample_count: 5,", "sample_count: 10,")
+          app.write_text(app_source, encoding='utf-8')
+
+          Path('.github/workflows/apply-forecast-intelligence-upgrade.yml').unlink()
+
+      - name: Validate syntax
+        run: |
+          python -m py_compile traid_live/service.py traid_live/service_patch.py traid_live/platform.py traid_live/config.py traid_live/cli.py
+          node --check dashboard/app-loader.js
+          node --check dashboard/forecast-intelligence.js
+
+      - name: Commit upgrade
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dashboard/app-loader.js dashboard/app.js dashboard/index.html dashboard/forecast-intelligence.js traid_live/config.py traid_live/platform.py traid_live/service.py traid_live/service_patch.py traid_live/cli.py .github/workflows/apply-forecast-intelligence-upgrade.yml
+          git commit -m "Upgrade forecast sampling confidence and market context"
+          git push origin HEAD:main
