@@ -3,6 +3,8 @@ let forecastBoundaryCoordinate = null;
 let entrySeriesMarkers = null;
 let positionEntryLines = [];
 let chartEnhancementResizeObserver = null;
+let historyContinuitySyncInFlight = false;
+let historyContinuityTimer = null;
 
 function installChartEnhancementStyles() {
   if (document.getElementById('traidChartEnhancementStyles')) return;
@@ -70,7 +72,6 @@ function installChartEnhancementStyles() {
 function chartEnhancementNodes() {
   return {
     wrap: document.querySelector('.chart-wrap'),
-    chartNode: document.getElementById('chart'),
     separator: document.getElementById('forecastBoundarySeparator'),
     realLabel: document.getElementById('forecastBoundaryRealLabel'),
     forecastLabel: document.getElementById('forecastBoundaryForecastLabel'),
@@ -101,15 +102,9 @@ function positionForecastBoundary() {
     leftDimmer,
     rightDimmer,
   } = chartEnhancementNodes();
-  if (
-    !wrap
-    || !separator
-    || !realLabel
-    || !forecastLabel
-    || !leftDimmer
-    || !rightDimmer
-    || !forecastBoundaryTimestamp
-  ) {
+
+  if (!wrap || !separator || !realLabel || !forecastLabel || !leftDimmer
+      || !rightDimmer || !forecastBoundaryTimestamp) {
     hideForecastBoundary();
     clearChartSideDimming();
     forecastBoundaryCoordinate = null;
@@ -183,8 +178,7 @@ function installChartEnhancements() {
 
   wrap.addEventListener('mousemove', event => {
     if (forecastBoundaryCoordinate == null) return;
-    const rectangle = wrap.getBoundingClientRect();
-    const pointerX = event.clientX - rectangle.left;
+    const pointerX = event.clientX - wrap.getBoundingClientRect().left;
     if (pointerX < forecastBoundaryCoordinate) {
       leftDimmer.classList.remove('active');
       rightDimmer.classList.add('active');
@@ -218,21 +212,18 @@ function renderPositionEntryVisuals(positions = []) {
   if (!relevant.length) return;
 
   const timeframeSeconds = TIMEFRAME_SECONDS[state.timeframe] || 60;
-  const markers = relevant
-    .map(position => {
-      const openedAt = Number(position.opened_at);
-      if (!Number.isFinite(openedAt)) return null;
-      const isLong = position.side === 'buy';
-      return {
-        time: Math.floor(openedAt / timeframeSeconds) * timeframeSeconds,
-        position: isLong ? 'belowBar' : 'aboveBar',
-        shape: isLong ? 'arrowUp' : 'arrowDown',
-        color: isLong ? '#2dd4bf' : '#fb7185',
-        text: `${isLong ? 'LONG' : 'SHORT'} ${position.volume ?? ''}`.trim(),
-      };
-    })
-    .filter(Boolean)
-    .sort((first, second) => first.time - second.time);
+  const markers = relevant.map(position => {
+    const openedAt = Number(position.opened_at);
+    if (!Number.isFinite(openedAt)) return null;
+    const isLong = position.side === 'buy';
+    return {
+      time: Math.floor(openedAt / timeframeSeconds) * timeframeSeconds,
+      position: isLong ? 'belowBar' : 'aboveBar',
+      shape: isLong ? 'arrowUp' : 'arrowDown',
+      color: isLong ? '#2dd4bf' : '#fb7185',
+      text: `${isLong ? 'LONG' : 'SHORT'} ${position.volume ?? ''}`.trim(),
+    };
+  }).filter(Boolean).sort((first, second) => first.time - second.time);
 
   if (typeof LightweightCharts.createSeriesMarkers === 'function') {
     try {
@@ -249,20 +240,61 @@ function renderPositionEntryVisuals(positions = []) {
   for (const position of relevant) {
     const isLong = position.side === 'buy';
     try {
-      positionEntryLines.push(
-        marketCandles.createPriceLine({
-          price: Number(position.open_price),
-          color: isLong ? 'rgba(45,212,191,.88)' : 'rgba(251,113,133,.88)',
-          lineWidth: 1,
-          lineStyle: LightweightCharts.LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: `${isLong ? '▲ LONG' : '▼ SHORT'} ${position.volume ?? ''}`.trim(),
-        }),
-      );
+      positionEntryLines.push(marketCandles.createPriceLine({
+        price: Number(position.open_price),
+        color: isLong ? 'rgba(45,212,191,.88)' : 'rgba(251,113,133,.88)',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `${isLong ? '▲ LONG' : '▼ SHORT'} ${position.volume ?? ''}`.trim(),
+      }));
     } catch (error) {
       console.warn('Could not render a position entry line.', error);
     }
   }
 }
 
+async function syncCompletedHistoryToLive({ force = false } = {}) {
+  if (historyContinuitySyncInFlight) return;
+
+  const symbol = state.symbol;
+  const timeframe = state.timeframe;
+  const requestId = state.marketRequestId;
+  const expectedSeconds = TIMEFRAME_SECONDS[timeframe] || 60;
+  const completedTime = Number(state.lastCompletedCandleTime || 0);
+  const liveTime = Number(state.currentCandleTime || 0);
+  const hasGap = completedTime > 0 && liveTime > 0
+    && liveTime - completedTime > expectedSeconds * 1.1;
+
+  if (!force && !hasGap) return;
+  historyContinuitySyncInFlight = true;
+
+  try {
+    const payload = await api(`/v1/candles/${symbol}?timeframe=${timeframe}&limit=400`);
+    if (!currentMarketRequest(requestId, symbol, timeframe)) return;
+
+    const rows = Array.isArray(payload?.candles) ? payload.candles : [];
+    if (!rows.length || !rowsMatchTimeframe(rows, timeframe)) return;
+
+    const latestCompletedTime = toTime(rows.at(-1)?.timestamp);
+    if (!Number.isFinite(latestCompletedTime)) return;
+    if (latestCompletedTime < Number(state.lastCompletedCandleTime || 0)) return;
+
+    setHistory(rows);
+    renderPriorForecasts();
+    positionForecastBoundary();
+  } catch (error) {
+    console.warn('Could not backfill completed candles.', error);
+  } finally {
+    historyContinuitySyncInFlight = false;
+  }
+}
+
+function installHistoryContinuityGuard() {
+  if (historyContinuityTimer) return;
+  setTimeout(() => syncCompletedHistoryToLive({ force: true }), 500);
+  historyContinuityTimer = setInterval(() => syncCompletedHistoryToLive(), 1250);
+}
+
 installChartEnhancements();
+installHistoryContinuityGuard();
