@@ -45,7 +45,7 @@ def main() -> None:
         import uvicorn
 
         uvicorn.run(
-            "traid_live.service_runtime:app",
+            "traid_live.final_runtime:app",
             host=args.host,
             port=args.port,
             reload=args.reload,
