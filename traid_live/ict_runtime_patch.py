@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from . import intelligence_v2 as v2
+from . import ict_context as context_engine
 from . import ict_runtime as runtime
 from . import trajectory_integrity as trajectory
 from .ict_context import ICT_VERSION
 from .ict_learning import adaptive_context_model
+from .ict_sessions import session_levels, session_name
 
 
 _ORIGINAL_MARKET_CONTEXT = runtime.market_context_with_ict
@@ -86,6 +88,11 @@ def matching_cache_with_context_identity(*args: Any, **kwargs: Any) -> dict[str,
     return cached
 
 
+# The analysis function resolves these module globals dynamically. Replacing them
+# upgrades both session labels and session liquidity highs/lows without modifying
+# the model's OHLC input contract.
+context_engine._session_name = session_name
+context_engine._session_levels = session_levels
 runtime._BASE_MATCHING_CACHE = _RAW_MATCHING_CACHE
 v2._market_context = market_context_with_adaptive_classifier
 v2._matching_cache = matching_cache_with_context_identity
