@@ -28,12 +28,15 @@ TIMEFRAMES: dict[str, Timeframe] = {
 MASSIVE_SYMBOLS = {
     "XAUUSD": "C:XAUUSD",
     "XAGUSD": "C:XAGUSD",
+    "EURUSD": "C:EURUSD",
+    "USDJPY": "C:USDJPY",
     "NAS100": "I:NDX",
     "SPX500": "I:SPX",
 }
 
 INDEX_SYMBOLS = {"NAS100", "SPX500"}
 METAL_SYMBOLS = {"XAUUSD", "XAGUSD"}
+FOREX_SYMBOLS = {"EURUSD", "USDJPY"}
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -43,6 +46,10 @@ def normalize_symbol(symbol: str) -> str:
         "GOLD": "XAUUSD",
         "XAG": "XAGUSD",
         "SILVER": "XAGUSD",
+        "EUR": "EURUSD",
+        "EUROUSD": "EURUSD",
+        "JPY": "USDJPY",
+        "DOLLARYEN": "USDJPY",
         "NDX": "NAS100",
         "US100": "NAS100",
         "NAS100": "NAS100",
