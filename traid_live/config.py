@@ -8,7 +8,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SUPPORTED_SYMBOLS = ("XAUUSD", "XAGUSD", "NAS100", "SPX500")
+SUPPORTED_SYMBOLS = (
+    "XAUUSD",
+    "XAGUSD",
+    "EURUSD",
+    "USDJPY",
+    "NAS100",
+    "SPX500",
+)
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -85,6 +92,8 @@ class Settings:
         defaults = {
             "XAUUSD": "XAUUSD",
             "XAGUSD": "XAGUSD",
+            "EURUSD": "EURUSD",
+            "USDJPY": "USDJPY",
             "NAS100": "NAS100",
             "SPX500": "SPX500",
         }
