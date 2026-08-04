@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 from typing import Any
 
@@ -8,7 +9,7 @@ from . import ict_context as context_engine
 from . import ict_runtime as runtime
 from . import trajectory_integrity as trajectory
 from .forecast import ForecastParameters
-from .platform import ForecastPlatform
+from .platform import ForecastPlatform, PlatformStore
 from .ict_context import ICT_VERSION
 from .ict_learning import adaptive_context_model
 from .ict_sessions import session_levels, session_name
@@ -17,6 +18,9 @@ from .ict_sessions import session_levels, session_name
 _ORIGINAL_MARKET_CONTEXT = runtime.market_context_with_ict
 _RAW_MATCHING_CACHE = trajectory._ORIGINAL_MATCHING_CACHE
 _ICT_GENERATE = ForecastPlatform.generate
+_SCORE_REALIZED = PlatformStore.score_realized
+_CALIBRATION_LOCK = threading.RLock()
+_CALIBRATION_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
 
 
 def _signature(context: dict[str, Any] | None) -> str | None:
@@ -128,6 +132,84 @@ def generate_with_fresh_hierarchy(
     )
 
 
+def raw_valid_forecasts(
+    store: PlatformStore,
+    symbol: str,
+    timeframe: str,
+    limit: int = 25,
+) -> list[dict[str, Any]]:
+    candidates = v2._raw_forecasts(store, symbol, timeframe, min(500, max(limit * 4, limit)))
+    valid: list[dict[str, Any]] = []
+    for item in candidates:
+        gate = (item.get("revision") or {}).get("regime_gate") or {}
+        if gate.get("fallback") == trajectory._SYNTHETIC_FALLBACK:
+            continue
+        valid.append(item)
+        if len(valid) >= limit:
+            break
+    return valid
+
+
+def raw_valid_forecast(store: PlatformStore, forecast_id: str) -> dict[str, Any] | None:
+    item = v2._raw_forecast(store, forecast_id)
+    if not item:
+        return None
+    gate = (item.get("revision") or {}).get("regime_gate") or {}
+    return None if gate.get("fallback") == trajectory._SYNTHETIC_FALLBACK else item
+
+
+def cached_context_calibration(
+    store: PlatformStore,
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    revision = item.get("revision") or {}
+    market_context = revision.get("market_context") or {}
+    context = revision.get("ict_context") or market_context.get("ict") or {}
+    ensemble = revision.get("path_ensemble") or {}
+    vote = ensemble.get("directional_vote") or {}
+    timeframe = str(item.get("timeframe") or "5m")
+    horizon = int(vote.get("horizon_candles") or runtime.ONE_HOUR_HORIZONS.get(timeframe, 1))
+    regime, structure_bias, session_name_value = runtime._calibration_key(item)
+    key = (
+        str(item.get("symbol")),
+        timeframe,
+        horizon,
+        regime,
+        structure_bias,
+        session_name_value,
+        context.get("version"),
+    )
+    with _CALIBRATION_LOCK:
+        cached = _CALIBRATION_CACHE.get(key)
+    if cached is not None:
+        return dict(cached)
+
+    calculated = runtime._ORIGINAL_CONTEXT_CALIBRATION(store, item)
+    with _CALIBRATION_LOCK:
+        _CALIBRATION_CACHE[key] = dict(calculated)
+    return calculated
+
+
+def score_realized_and_invalidate(
+    self: PlatformStore,
+    symbol: str,
+    timeframe: str,
+    actual: Any,
+) -> int:
+    inserted = _SCORE_REALIZED(self, symbol, timeframe, actual)
+    if inserted:
+        with _CALIBRATION_LOCK:
+            _CALIBRATION_CACHE.clear()
+    return inserted
+
+
+# Preserve the original implementation before replacing its global lookup with a
+# cached wrapper. New realized scores clear the cache immediately.
+runtime._ORIGINAL_CONTEXT_CALIBRATION = runtime._context_calibration
+runtime._context_calibration = cached_context_calibration
+runtime._BASE_STORE_FORECASTS = raw_valid_forecasts
+runtime._BASE_STORE_FORECAST = raw_valid_forecast
+
 # The analysis function resolves these module globals dynamically. Replacing them
 # upgrades both session labels and session liquidity highs/lows without modifying
 # the model's OHLC input contract.
@@ -136,4 +218,5 @@ context_engine._session_levels = session_levels
 runtime._BASE_MATCHING_CACHE = _RAW_MATCHING_CACHE
 v2._market_context = market_context_with_adaptive_classifier
 v2._matching_cache = matching_cache_with_context_identity
+PlatformStore.score_realized = score_realized_and_invalidate  # type: ignore[method-assign]
 ForecastPlatform.generate = generate_with_fresh_hierarchy  # type: ignore[method-assign]
