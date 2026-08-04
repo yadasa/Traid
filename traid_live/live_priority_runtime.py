@@ -55,7 +55,18 @@ def _apply_quote(
     quote: Any,
     timeframe: str,
 ) -> dict[str, Any]:
-    row = dict(candle) if candle else _fallback_candle(quote, timeframe)
+    expected = _fallback_candle(quote, timeframe)
+    try:
+        same_bucket = (
+            candle is not None
+            and _timestamp(candle["timestamp"]) == _timestamp(expected["timestamp"])
+        )
+    except Exception:
+        same_bucket = False
+
+    # A quote in a new timeframe bucket must begin a brand-new live candle
+    # immediately. Do not wait for the slower completed-bar worker to notice it.
+    row = dict(candle) if same_bucket and candle is not None else expected
     price = float(quote.price)
     opening = float(row.get("open", price))
     previous_high = float(row.get("high", max(opening, price)))
