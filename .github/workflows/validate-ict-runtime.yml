@@ -25,7 +25,9 @@ jobs:
         run: |
           python -m py_compile \
             traid_live/ict_context.py \
+            traid_live/ict_learning.py \
             traid_live/ict_runtime.py \
+            traid_live/ict_runtime_patch.py \
             traid_live/final_runtime.py
 
       - name: Validate dashboard JavaScript
