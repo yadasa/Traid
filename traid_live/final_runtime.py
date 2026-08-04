@@ -20,6 +20,11 @@ from . import intelligence_v2 as _intelligence_v2  # noqa: F401,E402
 # trade decision only.
 from . import trajectory_integrity as _trajectory_integrity  # noqa: F401,E402
 
+# Add deterministic ICT/SMC structure, liquidity, FVG, order-block, session and
+# event context. Rank genuine Kronos paths with that context, enforce the
+# 1h/15m/5m hierarchy, and calibrate confidence by market context.
+from . import ict_runtime as _ict_runtime  # noqa: F401,E402
+
 # Poll and publish the latest MT5 quote independently from model inference,
 # scoring, candle-boundary checks, and multi-timeframe analysis. The live candle
 # close is forced to the exact quote price in the same WebSocket payload.
