@@ -19,22 +19,22 @@ function installChartEnhancementStyles() {
       pointer-events:none;
       background:linear-gradient(180deg,#38bdf8 0%,#6366f1 46%,#a855f7 100%);
       box-shadow:0 0 8px rgba(56,189,248,.9),0 0 18px rgba(99,102,241,.75),0 0 30px rgba(168,85,247,.55);
-      animation:traidForecastBoundaryPulse 1.8s ease-in-out infinite;
+      animation:traidForecastBoundaryPulse 4.5s ease-in-out infinite;
     }
-    .forecast-boundary-separator::after {
-      content:'REAL  |  FORECAST';
+    .forecast-boundary-label {
       position:absolute;
-      top:10px;
-      left:50%;
-      transform:translateX(-50%);
-      padding:3px 7px;
-      border:1px solid rgba(129,140,248,.36);
-      border-radius:999px;
-      background:rgba(7,11,27,.88);
-      color:#c4b5fd;
-      font:800 8px/1 system-ui,sans-serif;
-      letter-spacing:.08em;
+      top:12px;
+      z-index:8;
+      display:none;
+      pointer-events:none;
+      color:#fff;
+      font:700 9px/1 system-ui,sans-serif;
+      letter-spacing:.12em;
       white-space:nowrap;
+    }
+    .forecast-boundary-label.real {
+      transform:translateX(-100%);
+      text-align:right;
     }
     .chart-side-dimmer {
       position:absolute;
@@ -72,6 +72,8 @@ function chartEnhancementNodes() {
     wrap: document.querySelector('.chart-wrap'),
     chartNode: document.getElementById('chart'),
     separator: document.getElementById('forecastBoundarySeparator'),
+    realLabel: document.getElementById('forecastBoundaryRealLabel'),
+    forecastLabel: document.getElementById('forecastBoundaryForecastLabel'),
     leftDimmer: document.getElementById('forecastLeftDimmer'),
     rightDimmer: document.getElementById('forecastRightDimmer'),
   };
@@ -83,10 +85,32 @@ function clearChartSideDimming() {
   rightDimmer?.classList.remove('active');
 }
 
+function hideForecastBoundary() {
+  const { separator, realLabel, forecastLabel } = chartEnhancementNodes();
+  if (separator) separator.style.display = 'none';
+  if (realLabel) realLabel.style.display = 'none';
+  if (forecastLabel) forecastLabel.style.display = 'none';
+}
+
 function positionForecastBoundary() {
-  const { wrap, separator, leftDimmer, rightDimmer } = chartEnhancementNodes();
-  if (!wrap || !separator || !leftDimmer || !rightDimmer || !forecastBoundaryTimestamp) {
-    if (separator) separator.style.display = 'none';
+  const {
+    wrap,
+    separator,
+    realLabel,
+    forecastLabel,
+    leftDimmer,
+    rightDimmer,
+  } = chartEnhancementNodes();
+  if (
+    !wrap
+    || !separator
+    || !realLabel
+    || !forecastLabel
+    || !leftDimmer
+    || !rightDimmer
+    || !forecastBoundaryTimestamp
+  ) {
+    hideForecastBoundary();
     clearChartSideDimming();
     forecastBoundaryCoordinate = null;
     return;
@@ -94,7 +118,7 @@ function positionForecastBoundary() {
 
   const forecastX = chart.timeScale().timeToCoordinate(forecastBoundaryTimestamp);
   if (forecastX == null || !Number.isFinite(forecastX)) {
-    separator.style.display = 'none';
+    hideForecastBoundary();
     clearChartSideDimming();
     forecastBoundaryCoordinate = null;
     return;
@@ -111,6 +135,10 @@ function positionForecastBoundary() {
 
   separator.style.left = `${coordinate}px`;
   separator.style.display = 'block';
+  realLabel.style.left = `${Math.max(0, coordinate - 10)}px`;
+  realLabel.style.display = 'block';
+  forecastLabel.style.left = `${Math.min(wrap.clientWidth, coordinate + 10)}px`;
+  forecastLabel.style.display = 'block';
   leftDimmer.style.left = '0';
   leftDimmer.style.width = `${coordinate}px`;
   rightDimmer.style.left = `${coordinate}px`;
@@ -141,7 +169,17 @@ function installChartEnhancements() {
   separator.id = 'forecastBoundarySeparator';
   separator.className = 'forecast-boundary-separator';
 
-  wrap.append(leftDimmer, rightDimmer, separator);
+  const realLabel = document.createElement('span');
+  realLabel.id = 'forecastBoundaryRealLabel';
+  realLabel.className = 'forecast-boundary-label real';
+  realLabel.textContent = 'REAL';
+
+  const forecastLabel = document.createElement('span');
+  forecastLabel.id = 'forecastBoundaryForecastLabel';
+  forecastLabel.className = 'forecast-boundary-label forecast';
+  forecastLabel.textContent = 'FORECAST';
+
+  wrap.append(leftDimmer, rightDimmer, separator, realLabel, forecastLabel);
 
   wrap.addEventListener('mousemove', event => {
     if (forecastBoundaryCoordinate == null) return;
