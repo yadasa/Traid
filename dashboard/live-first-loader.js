@@ -2,6 +2,7 @@
   const wrapperUrl = document.currentScript.src;
   const originalLoaderUrl = new URL('./app-loader.js', wrapperUrl).href;
   const enhancementUrl = new URL('./chart-enhancements-runtime.js', wrapperUrl).href;
+  const scaleRuntimeUrl = new URL('./chart-scale-runtime.js', wrapperUrl).href;
 
   const additionalMarkets = [
     { symbol: 'EURUSD', label: 'Euro / U.S. Dollar', shortLabel: 'Euro / U.S. Dollar' },
@@ -56,8 +57,12 @@
       if (!response.ok) throw new Error(`Could not load chart-enhancements-runtime.js (${response.status})`);
       return response.text();
     }),
+    fetch(scaleRuntimeUrl, { cache: 'no-store' }).then(response => {
+      if (!response.ok) throw new Error(`Could not load chart-scale-runtime.js (${response.status})`);
+      return response.text();
+    }),
   ])
-    .then(([original, chartEnhancements]) => {
+    .then(([original, chartEnhancements, chartScaleRuntime]) => {
       let source = original;
 
       // The fetched loader is injected as inline code, so preserve its original
@@ -139,8 +144,36 @@
       }
       source = source.replace(
         chartInsertionMarker,
-        'let replaySeries;\\n\\n' + ${JSON.stringify(chartEnhancements)} + '\\nfunction applyChartType() {'
+        'let replaySeries;\\n\\n' + ${JSON.stringify(chartEnhancements)} + '\\n' + ${JSON.stringify(chartScaleRuntime)} + '\\nfunction applyChartType() {'
       );
+
+      const quoteDigitsMarker = "  const digits = +quote.price > 1000 ? 2 : 4;";
+      if (!source.includes(quoteDigitsMarker)) {
+        throw new Error('Could not locate quote precision handling.');
+      }
+      source = source.replace(
+        quoteDigitsMarker,
+        "  applySymbolPriceFormat(state.symbol, quote);\\n  const digits = symbolPricePrecision(state.symbol, quote);"
+      );
+      source = source.replaceAll(
+        'payload.quote.price > 1000 ? 2 : 4',
+        'symbolPricePrecision(symbol, payload.quote)'
+      );
+
+      const marketResetMarker = "  state.lastStreamAt = 0;\\n  resetProjectionHistory(); setFeed(false, 'Loading market and model…');";
+      if (!source.includes(marketResetMarker)) {
+        throw new Error('Could not locate market-switch reset point.');
+      }
+      source = source.replace(
+        marketResetMarker,
+        "  state.lastStreamAt = 0;\\n  resetChartForMarketSwitch(requestedSymbol);\\n  resetProjectionHistory(); setFeed(false, 'Loading market and model…');"
+      );
+
+      const fitMarker = '    if (fit) chart.timeScale().fitContent();';
+      if (!source.includes(fitMarker)) {
+        throw new Error('Could not locate market fit point.');
+      }
+      source = source.replace(fitMarker, '    if (fit) fitCurrentMarket();');
 
       source = source.replace(
         "  renderRevision(revision);\\n  return true;\\n}",
