@@ -3,6 +3,7 @@
   const originalLoaderUrl = new URL('./app-loader.js', wrapperUrl).href;
   const enhancementUrl = new URL('./chart-enhancements-runtime.js', wrapperUrl).href;
   const scaleRuntimeUrl = new URL('./chart-scale-runtime.js', wrapperUrl).href;
+  const forecastHistoryRuntimeUrl = new URL('./forecast-history-runtime.js', wrapperUrl).href;
 
   const additionalMarkets = [
     { symbol: 'EURUSD', label: 'Euro / U.S. Dollar', shortLabel: 'Euro / U.S. Dollar' },
@@ -61,8 +62,12 @@
       if (!response.ok) throw new Error(`Could not load chart-scale-runtime.js (${response.status})`);
       return response.text();
     }),
+    fetch(forecastHistoryRuntimeUrl, { cache: 'no-store' }).then(response => {
+      if (!response.ok) throw new Error(`Could not load forecast-history-runtime.js (${response.status})`);
+      return response.text();
+    }),
   ])
-    .then(([original, chartEnhancements, chartScaleRuntime]) => {
+    .then(([original, chartEnhancements, chartScaleRuntime, forecastHistoryRuntime]) => {
       let source = original;
 
       // The fetched loader is injected as inline code, so preserve its original
@@ -144,7 +149,7 @@
       }
       source = source.replace(
         chartInsertionMarker,
-        'let replaySeries;\\n\\n' + ${JSON.stringify(chartEnhancements)} + '\\n' + ${JSON.stringify(chartScaleRuntime)} + '\\nfunction applyChartType() {'
+        'let replaySeries;\\n\\n' + ${JSON.stringify(chartEnhancements)} + '\\n' + ${JSON.stringify(chartScaleRuntime)} + '\\n' + ${JSON.stringify(forecastHistoryRuntime)} + '\\nfunction applyChartType() {'
       );
 
       const quoteDigitsMarker = "  const digits = +quote.price > 1000 ? 2 : 4;";
@@ -160,13 +165,22 @@
         'symbolPricePrecision(symbol, payload.quote)'
       );
 
+      const chartTypeMarker = "  localStorage.setItem('traidChartType', state.chartType);\\n}";
+      if (!source.includes(chartTypeMarker)) {
+        throw new Error('Could not locate chart-type visibility handling.');
+      }
+      source = source.replace(
+        chartTypeMarker,
+        "  localStorage.setItem('traidChartType', state.chartType);\\n  applyPriorPredictionVisibility();\\n  applyLockedPredictionVisibility();\\n}"
+      );
+
       const marketResetMarker = "  state.lastStreamAt = 0;\\n  resetProjectionHistory(); setFeed(false, 'Loading market and model…');";
       if (!source.includes(marketResetMarker)) {
         throw new Error('Could not locate market-switch reset point.');
       }
       source = source.replace(
         marketResetMarker,
-        "  state.lastStreamAt = 0;\\n  resetChartForMarketSwitch(requestedSymbol);\\n  resetProjectionHistory(); setFeed(false, 'Loading market and model…');"
+        "  state.lastStreamAt = 0;\\n  resetChartForMarketSwitch(requestedSymbol);\\n  restoreLockedForecast(requestedSymbol, requestedTimeframe);\\n  resetProjectionHistory(); setFeed(false, 'Loading market and model…');"
       );
 
       const fitMarker = '    if (fit) chart.timeScale().fitContent();';
@@ -177,11 +191,15 @@
 
       source = source.replace(
         "  renderRevision(revision);\\n  return true;\\n}",
-        "  renderRevision(revision);\\n  updateForecastBoundary(next);\\n  return true;\\n}"
+        "  renderRevision(revision);\\n  updateForecastBoundary(next);\\n  refreshForecastHistoryControls();\\n  return true;\\n}"
       );
       source = source.replace(
         "  state.projectionHistory = []; state.renderedProjection = []; state.projectionAnimationFrame = null;\\n}",
-        "  state.projectionHistory = []; state.renderedProjection = []; state.projectionAnimationFrame = null;\\n  updateForecastBoundary([]);\\n}"
+        "  state.projectionHistory = []; state.renderedProjection = []; state.projectionAnimationFrame = null;\\n  updateForecastBoundary([]);\\n  refreshForecastHistoryControls();\\n}"
+      );
+      source = source.replace(
+        "    renderPriorForecasts(); renderAccuracy(payload.accuracy);",
+        "    renderPriorForecasts(); applyPriorPredictionVisibility(); refreshForecastHistoryControls(); renderAccuracy(payload.accuracy);"
       );
       source = source.replace(
         "state.positions = payload.positions || []; state.pending = payload.pending_orders || [];",
