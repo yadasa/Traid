@@ -34,6 +34,10 @@ from . import ict_runtime_patch as _ict_runtime_patch  # noqa: F401,E402
 # fresh Advanced forecast already exists for the same candle.
 from . import ict_consensus_runtime as _ict_consensus_runtime  # noqa: F401,E402
 
+# Populate the existing economic-event store from the public Forex Factory weekly
+# export, refresh it hourly, and map each event to affected Traid symbols.
+from . import calendar_runtime as _calendar_runtime  # noqa: F401,E402
+
 # Poll and publish the latest MT5 quote independently from model inference,
 # scoring, candle-boundary checks, and multi-timeframe analysis. The live candle
 # close is forced to the exact quote price in the same WebSocket payload.
