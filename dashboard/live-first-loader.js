@@ -75,6 +75,46 @@
     .then(([original, chartEnhancements, chartScaleRuntime, forecastHistoryRuntime, calendarUiRuntime]) => {
       let source = original;
 
+      // These files are injected before the latter half of app.js. Their setup
+      // functions must wait until cloneProjection, TIMEFRAME_SECONDS, bootstrap,
+      // and the remaining base-app constants have all finished initializing.
+      const chartInitMarker = 'installChartEnhancements();\ninstallHistoryContinuityGuard();';
+      if (!chartEnhancements.includes(chartInitMarker)) {
+        throw new Error('Could not locate chart-enhancement initialization.');
+      }
+      const safeChartEnhancements = chartEnhancements.replace(
+        chartInitMarker,
+        `queueMicrotask(() => {\n  installChartEnhancements();\n  installHistoryContinuityGuard();\n});`,
+      );
+
+      let safeForecastHistoryRuntime = forecastHistoryRuntime;
+      const hoverStateMarker = 'let lockedForecastStyleFrame = null;';
+      if (!safeForecastHistoryRuntime.includes(hoverStateMarker)) {
+        throw new Error('Could not locate locked-forecast hover state.');
+      }
+      safeForecastHistoryRuntime = safeForecastHistoryRuntime.replace(
+        hoverStateMarker,
+        `${hoverStateMarker}\nlet lockedForecastHoverTarget = 0;`,
+      );
+
+      const hoverAnimationMarker = `function animateLockedForecastStyle(target) {\n  const clampedTarget = Math.max(0, Math.min(1, Number(target) || 0));`;
+      if (!safeForecastHistoryRuntime.includes(hoverAnimationMarker)) {
+        throw new Error('Could not locate locked-forecast hover animation.');
+      }
+      safeForecastHistoryRuntime = safeForecastHistoryRuntime.replace(
+        hoverAnimationMarker,
+        `${hoverAnimationMarker}\n  if (clampedTarget === lockedForecastHoverTarget\n      && (lockedForecastStyleFrame || Math.abs(lockedForecastStyleProgress - clampedTarget) < 0.001)) {\n    return;\n  }\n  lockedForecastHoverTarget = clampedTarget;`,
+      );
+
+      const forecastHistoryInitMarker = `installForecastHistoryControls();\nrestoreLockedForecast(state.symbol, state.timeframe);\napplyPriorPredictionVisibility();`;
+      if (!safeForecastHistoryRuntime.includes(forecastHistoryInitMarker)) {
+        throw new Error('Could not locate forecast-history initialization.');
+      }
+      safeForecastHistoryRuntime = safeForecastHistoryRuntime.replace(
+        forecastHistoryInitMarker,
+        `queueMicrotask(() => {\n  installForecastHistoryControls();\n  restoreLockedForecast(state.symbol, state.timeframe);\n  applyPriorPredictionVisibility();\n});`,
+      );
+
       // The fetched loader is injected as inline code, so preserve its original
       // URL explicitly for relative app.js and forecast-intelligence.js requests.
       const loaderMarker = 'const loaderUrl = document.currentScript.src;';
@@ -154,7 +194,7 @@
       }
       source = source.replace(
         chartInsertionMarker,
-        'let replaySeries;\\n\\n' + ${JSON.stringify(chartEnhancements)} + '\\n' + ${JSON.stringify(chartScaleRuntime)} + '\\n' + ${JSON.stringify(forecastHistoryRuntime)} + '\\nfunction applyChartType() {'
+        'let replaySeries;\\n\\n' + ${JSON.stringify(safeChartEnhancements)} + '\\n' + ${JSON.stringify(chartScaleRuntime)} + '\\n' + ${JSON.stringify(safeForecastHistoryRuntime)} + '\\nfunction applyChartType() {'
       );
 
       const calendarStart = source.indexOf('async function loadCalendar() {');
