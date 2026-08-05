@@ -133,6 +133,15 @@ function resetChartForMarketSwitch(symbol = state.symbol) {
     });
   } catch (_) {}
   try { chart.timeScale().resetTimeScale?.(); } catch (_) {}
+
+  // The live socket can paint the new forming candle before the much slower
+  // forecast request completes. Restore completed history independently so the
+  // chart never sits on one candle while Kronos is still processing.
+  setTimeout(() => {
+    if (typeof syncCompletedHistoryToLive === 'function') {
+      syncCompletedHistoryToLive({ force: true });
+    }
+  }, 0);
 }
 
 function fitCurrentMarket({ fitTime = true } = {}) {
