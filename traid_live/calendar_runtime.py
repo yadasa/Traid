@@ -168,9 +168,10 @@ async def _calendar_loop() -> None:
 @app.on_event("startup")
 async def start_free_calendar_runtime() -> None:
     global _calendar_task
-    if not FREE_CALENDAR_ENABLED:
+    if not FREE_CALENDAR_ENABLED or _calendar_task:
         return
-    await refresh_free_calendar(force=True)
+    # The market feed and API should become available immediately. Calendar I/O
+    # starts in its own task and never delays server startup or live prices.
     _calendar_task = asyncio.create_task(_calendar_loop())
 
 
