@@ -263,8 +263,10 @@ async function syncCompletedHistoryToLive({ force = false } = {}) {
   const expectedSeconds = TIMEFRAME_SECONDS[timeframe] || 60;
   const completedTime = Number(state.lastCompletedCandleTime || 0);
   const liveTime = Number(state.currentCandleTime || 0);
-  const hasGap = completedTime > 0 && liveTime > 0
-    && liveTime - completedTime > expectedSeconds * 1.1;
+  const missingHistory = liveTime > 0 && completedTime <= 0;
+  const hasGap = liveTime > 0 && (
+    missingHistory || liveTime - completedTime > expectedSeconds * 1.1
+  );
 
   if (!force && !hasGap) return;
   historyContinuitySyncInFlight = true;
@@ -274,7 +276,7 @@ async function syncCompletedHistoryToLive({ force = false } = {}) {
     if (!currentMarketRequest(requestId, symbol, timeframe)) return;
 
     const rows = Array.isArray(payload?.candles) ? payload.candles : [];
-    if (!rows.length || !rowsMatchTimeframe(rows, timeframe)) return;
+    if (rows.length < 2 || !rowsMatchTimeframe(rows, timeframe)) return;
 
     const latestCompletedTime = toTime(rows.at(-1)?.timestamp);
     if (!Number.isFinite(latestCompletedTime)) return;
@@ -283,6 +285,7 @@ async function syncCompletedHistoryToLive({ force = false } = {}) {
     setHistory(rows);
     renderPriorForecasts();
     positionForecastBoundary();
+    if (typeof fitCurrentMarket === 'function') fitCurrentMarket();
   } catch (error) {
     console.warn('Could not backfill completed candles.', error);
   } finally {
