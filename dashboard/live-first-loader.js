@@ -4,6 +4,7 @@
   const enhancementUrl = new URL('./chart-enhancements-runtime.js', wrapperUrl).href;
   const scaleRuntimeUrl = new URL('./chart-scale-runtime.js', wrapperUrl).href;
   const forecastHistoryRuntimeUrl = new URL('./forecast-history-runtime.js', wrapperUrl).href;
+  const calendarUiRuntimeUrl = new URL('./calendar-ui-runtime.js', wrapperUrl).href;
 
   const additionalMarkets = [
     { symbol: 'EURUSD', label: 'Euro / U.S. Dollar', shortLabel: 'Euro / U.S. Dollar' },
@@ -66,8 +67,12 @@
       if (!response.ok) throw new Error(`Could not load forecast-history-runtime.js (${response.status})`);
       return response.text();
     }),
+    fetch(calendarUiRuntimeUrl, { cache: 'no-store' }).then(response => {
+      if (!response.ok) throw new Error(`Could not load calendar-ui-runtime.js (${response.status})`);
+      return response.text();
+    }),
   ])
-    .then(([original, chartEnhancements, chartScaleRuntime, forecastHistoryRuntime]) => {
+    .then(([original, chartEnhancements, chartScaleRuntime, forecastHistoryRuntime, calendarUiRuntime]) => {
       let source = original;
 
       // The fetched loader is injected as inline code, so preserve its original
@@ -152,6 +157,13 @@
         'let replaySeries;\\n\\n' + ${JSON.stringify(chartEnhancements)} + '\\n' + ${JSON.stringify(chartScaleRuntime)} + '\\n' + ${JSON.stringify(forecastHistoryRuntime)} + '\\nfunction applyChartType() {'
       );
 
+      const calendarStart = source.indexOf('async function loadCalendar() {');
+      const calendarEnd = source.indexOf('\\n\\nasync function loadTrading() {', calendarStart);
+      if (calendarStart < 0 || calendarEnd < 0) {
+        throw new Error('Could not locate the economic-calendar function.');
+      }
+      source = source.slice(0, calendarStart) + ${JSON.stringify(calendarUiRuntime)} + source.slice(calendarEnd);
+
       const quoteDigitsMarker = "  const digits = +quote.price > 1000 ? 2 : 4;";
       if (!source.includes(quoteDigitsMarker)) {
         throw new Error('Could not locate quote precision handling.');
@@ -207,7 +219,7 @@
       );
       source = source.replace(
         "  document.querySelectorAll('.watch-item').forEach(item => item.classList.toggle('active', item.dataset.symbol === requestedSymbol));",
-        "  document.querySelectorAll('.watch-item').forEach(item => item.classList.toggle('active', item.dataset.symbol === requestedSymbol));\\n  renderPositionEntryVisuals(state.positions);"
+        "  document.querySelectorAll('.watch-item').forEach(item => item.classList.toggle('active', item.dataset.symbol === requestedSymbol));\\n  renderPositionEntryVisuals(state.positions);\\n  loadCalendar();"
       );
 `;
       source = source.replace(
