@@ -57,6 +57,17 @@ def _affected_symbols(currency: str, title: str) -> list[str]:
     return []
 
 
+def _event_symbols(event: dict[str, Any]) -> list[str]:
+    metadata = event.get("metadata") or {}
+    explicit = metadata.get("affected_symbols")
+    if isinstance(explicit, list) and explicit:
+        return [str(symbol).upper() for symbol in explicit]
+    return _affected_symbols(
+        str(event.get("currency") or ""),
+        str(event.get("title") or ""),
+    )
+
+
 def _event_id(currency: str, title: str, starts_at: pd.Timestamp) -> str:
     raw = f"fair-economy|{currency.upper()}|{title.strip()}|{starts_at.isoformat()}"
     return "ff-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()
@@ -198,11 +209,11 @@ async def live_calendar(
     events = store.events(start, end, impact)
     selected = str(symbol or "").upper().strip()
     if selected:
-        events = [
-            event
-            for event in events
-            if selected in ((event.get("metadata") or {}).get("affected_symbols") or [])
-        ]
+        events = [event for event in events if selected in _event_symbols(event)]
+    for event in events:
+        metadata = dict(event.get("metadata") or {})
+        metadata.setdefault("affected_symbols", _event_symbols(event))
+        event["metadata"] = metadata
     return {
         "events": events,
         "symbol": selected or None,
