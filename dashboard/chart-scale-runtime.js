@@ -38,17 +38,31 @@ function installChartScaleStyles() {
   style.id = 'traidChartScaleStyles';
   style.textContent = `
     .chart-side-dimmer {
+      z-index:4 !important;
       background:rgba(3,6,18,.24) !important;
       -webkit-backdrop-filter:saturate(40%) brightness(68%) !important;
       backdrop-filter:saturate(40%) brightness(68%) !important;
       transition:opacity 250ms ease !important;
     }
+    .forecast-boundary-separator {
+      z-index:6 !important;
+    }
+    .forecast-boundary-label {
+      z-index:7 !important;
+    }
     .forecast-intelligence-overlay {
-      z-index:12 !important;
+      bottom:46px !important;
+      z-index:30 !important;
     }
     .forecast-intelligence-card {
       position:relative;
-      z-index:13;
+      z-index:31 !important;
+    }
+    @media (max-width:900px) {
+      .forecast-intelligence-overlay { bottom:42px !important; }
+    }
+    @media (max-width:540px) {
+      .forecast-intelligence-overlay { bottom:38px !important; }
     }
   `;
   document.head.appendChild(style);
