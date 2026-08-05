@@ -1,0 +1,64 @@
+name: Validate Calendar and Chart Layout
+
+on:
+  push:
+    paths:
+      - .github/workflows/validate-calendar-layout.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate source syntax
+        run: |
+          python -m py_compile traid_live/calendar_runtime.py traid_live/final_runtime.py
+          node --check dashboard/calendar-ui-runtime.js
+          node --check dashboard/chart-scale-runtime.js
+          node --check dashboard/live-first-loader.js
+
+      - name: Validate loader markers
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const appLoader = fs.readFileSync('dashboard/app-loader.js', 'utf8');
+          const wrapper = fs.readFileSync('dashboard/live-first-loader.js', 'utf8');
+          const appMarkers = [
+            'async function loadCalendar() {',
+            '\n\nasync function loadTrading() {',
+            "  document.querySelectorAll('.watch-item').forEach(item => item.classList.toggle('active', item.dataset.symbol === requestedSymbol));",
+          ];
+          for (const marker of appMarkers) {
+            if (!appLoader.includes(marker)) throw new Error(`Missing app-loader marker: ${marker}`);
+          }
+          const wrapperMarkers = [
+            'calendar-ui-runtime.js',
+            '/v1/calendar/live',
+            'loadCalendar();',
+            'forecast-intelligence-overlay',
+          ];
+          const combined = wrapper + fs.readFileSync('dashboard/calendar-ui-runtime.js', 'utf8') + fs.readFileSync('dashboard/chart-scale-runtime.js', 'utf8');
+          for (const marker of wrapperMarkers) {
+            if (!combined.includes(marker)) throw new Error(`Missing integration marker: ${marker}`);
+          }
+          NODE
+
+      - name: Remove one-time validator
+        run: |
+          rm .github/workflows/validate-calendar-layout.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/validate-calendar-layout.yml
+          git commit -m "Remove completed calendar and layout validator"
+          git push origin HEAD:main
