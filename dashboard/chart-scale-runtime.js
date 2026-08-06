@@ -31,6 +31,9 @@ const LIVE_DIRECTION_COLORS = Object.freeze({
 let appliedSymbolPriceFormat = '';
 let liveCandleOpenPrice = null;
 let liveCandleDirection = 'neutral';
+let chartViewportUserControlled = false;
+let chartViewportLastInteractionAt = 0;
+let chartViewportGuardInstalled = false;
 
 function quotePrecision(quote) {
   const explicit = Number(quote?.digits ?? quote?.precision);
@@ -86,6 +89,44 @@ function updateLiveDirectionVisual(row = null, quote = null) {
     try { state.priceLine.applyOptions({ color: palette.line }); } catch (_) {}
   }
   return palette;
+}
+
+function markChartViewportInteraction() {
+  chartViewportUserControlled = true;
+  chartViewportLastInteractionAt = Date.now();
+}
+
+function resetChartViewportInteraction() {
+  chartViewportUserControlled = false;
+  chartViewportLastInteractionAt = 0;
+}
+
+function installChartViewportGuard() {
+  if (chartViewportGuardInstalled) return;
+  const chartNode = document.getElementById('chart');
+  if (!chartNode) return;
+  chartViewportGuardInstalled = true;
+
+  let pointerActive = false;
+  chartNode.addEventListener('wheel', markChartViewportInteraction, { passive: true });
+  chartNode.addEventListener('pointerdown', () => {
+    pointerActive = true;
+  });
+  chartNode.addEventListener('pointermove', event => {
+    if (pointerActive && (event.buttons > 0 || event.pressure > 0)) {
+      markChartViewportInteraction();
+    }
+  });
+  window.addEventListener('pointerup', () => {
+    pointerActive = false;
+  });
+  window.addEventListener('pointercancel', () => {
+    pointerActive = false;
+  });
+  chartNode.addEventListener('touchstart', event => {
+    if (event.touches.length > 1) markChartViewportInteraction();
+  }, { passive: true });
+  chartNode.addEventListener('touchmove', markChartViewportInteraction, { passive: true });
 }
 
 function installChartScaleStyles() {
@@ -201,6 +242,7 @@ function resetChartForMarketSwitch(symbol = state.symbol) {
   updateLiveDirectionVisual();
   appliedSymbolPriceFormat = '';
   applySymbolPriceFormat(symbol);
+  resetChartViewportInteraction();
 
   try {
     chart.priceScale('right').applyOptions({
@@ -220,7 +262,7 @@ function resetChartForMarketSwitch(symbol = state.symbol) {
   }, 0);
 }
 
-function fitCurrentMarket({ fitTime = true } = {}) {
+function fitCurrentMarket({ fitTime = true, forceTime = false } = {}) {
   applySymbolPriceFormat(state.symbol, state.quote);
   const rescale = () => {
     try {
@@ -232,7 +274,8 @@ function fitCurrentMarket({ fitTime = true } = {}) {
   };
 
   rescale();
-  if (fitTime) {
+  const preserveUserViewport = chartViewportUserControlled && !forceTime;
+  if (fitTime && !preserveUserViewport) {
     try { chart.timeScale().fitContent(); } catch (_) {}
   }
   requestAnimationFrame(() => {
@@ -242,5 +285,6 @@ function fitCurrentMarket({ fitTime = true } = {}) {
 }
 
 installChartScaleStyles();
+installChartViewportGuard();
 applySymbolPriceFormat(state.symbol);
 updateLiveDirectionVisual();
