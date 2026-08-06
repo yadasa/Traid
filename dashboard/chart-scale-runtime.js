@@ -37,6 +37,23 @@ function installChartScaleStyles() {
   const style = document.createElement('style');
   style.id = 'traidChartScaleStyles';
   style.textContent = `
+    .chart-toolbar {
+      position:relative !important;
+      overflow:visible !important;
+      z-index:50 !important;
+    }
+    .forecast-history-controls,
+    .forecast-lock-wrap {
+      position:relative !important;
+      z-index:51 !important;
+    }
+    .forecast-lock-menu {
+      z-index:100 !important;
+    }
+    .chart-status-row {
+      position:relative;
+      z-index:4;
+    }
     .chart-side-dimmer {
       z-index:4 !important;
       background:rgba(3,6,18,.24) !important;
