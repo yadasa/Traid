@@ -217,6 +217,24 @@
         'symbolPricePrecision(symbol, payload.quote)'
       );
 
+      const liveCandleMarker = "  liveCandles.setData([toCandle(row)]); liveLine.setData([toLine(row)]);\\n  marketVolume.update(toVolume(row, +row.close >= +row.open ? 'rgba(34,211,238,.24)' : 'rgba(56,189,248,.22)'));";
+      if (!source.includes(liveCandleMarker)) {
+        throw new Error('Could not locate live-candle rendering.');
+      }
+      source = source.replace(
+        liveCandleMarker,
+        "  liveCandles.setData([toCandle(row)]); liveLine.setData([toLine(row)]);\\n  const livePalette = updateLiveDirectionVisual(row, state.quote);\\n  marketVolume.update(toVolume(row, livePalette.volume));"
+      );
+
+      const livePriceLineMarker = "  if (!state.priceLine) state.priceLine = marketCandles.createPriceLine({ price: +quote.price, color: '#22d3ee', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: 'LIVE' });\\n  else state.priceLine.applyOptions({ price: +quote.price });";
+      if (!source.includes(livePriceLineMarker)) {
+        throw new Error('Could not locate live-price line rendering.');
+      }
+      source = source.replace(
+        livePriceLineMarker,
+        "  const livePalette = updateLiveDirectionVisual(null, quote);\\n  if (!state.priceLine) state.priceLine = marketCandles.createPriceLine({ price: +quote.price, color: livePalette.line, lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, axisLabelVisible: true, title: 'LIVE' });\\n  else state.priceLine.applyOptions({ price: +quote.price, color: livePalette.line });"
+      );
+
       const chartTypeMarker = "  localStorage.setItem('traidChartType', state.chartType);\\n}";
       if (!source.includes(chartTypeMarker)) {
         throw new Error('Could not locate chart-type visibility handling.');
