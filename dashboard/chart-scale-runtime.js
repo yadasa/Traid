@@ -7,7 +7,30 @@ const SYMBOL_PRICE_FORMATS = Object.freeze({
   SPX500: { precision: 2, minMove: 0.01 },
 });
 
+const LIVE_DIRECTION_COLORS = Object.freeze({
+  bullish: {
+    body: '#2dd4bf',
+    wick: '#5eead4',
+    line: '#14b8a6',
+    volume: 'rgba(45,212,191,.24)',
+  },
+  bearish: {
+    body: '#d9467d',
+    wick: '#f472b6',
+    line: '#db2777',
+    volume: 'rgba(217,70,125,.24)',
+  },
+  neutral: {
+    body: '#94a3b8',
+    wick: '#cbd5e1',
+    line: '#94a3b8',
+    volume: 'rgba(148,163,184,.20)',
+  },
+});
+
 let appliedSymbolPriceFormat = '';
+let liveCandleOpenPrice = null;
+let liveCandleDirection = 'neutral';
 
 function quotePrecision(quote) {
   const explicit = Number(quote?.digits ?? quote?.precision);
@@ -30,6 +53,39 @@ function symbolPriceSpec(symbol = state.symbol, quote = null) {
 
 function symbolPricePrecision(symbol = state.symbol, quote = null) {
   return symbolPriceSpec(symbol, quote).precision;
+}
+
+function liveDirectionForPrice(price) {
+  const current = Number(price);
+  const open = Number(liveCandleOpenPrice);
+  if (!Number.isFinite(current) || !Number.isFinite(open)) return 'neutral';
+  if (current > open) return 'bullish';
+  if (current < open) return 'bearish';
+  return 'neutral';
+}
+
+function updateLiveDirectionVisual(row = null, quote = null) {
+  if (row && Number.isFinite(Number(row.open))) {
+    liveCandleOpenPrice = Number(row.open);
+  }
+  const price = Number(row?.close ?? quote?.price ?? state.quote?.price);
+  const direction = liveDirectionForPrice(price);
+  const palette = LIVE_DIRECTION_COLORS[direction];
+  liveCandleDirection = direction;
+
+  liveCandles.applyOptions({
+    upColor: LIVE_DIRECTION_COLORS.bullish.body,
+    downColor: LIVE_DIRECTION_COLORS.bearish.body,
+    borderUpColor: LIVE_DIRECTION_COLORS.bullish.body,
+    borderDownColor: LIVE_DIRECTION_COLORS.bearish.body,
+    wickUpColor: LIVE_DIRECTION_COLORS.bullish.wick,
+    wickDownColor: LIVE_DIRECTION_COLORS.bearish.wick,
+  });
+  liveLine.applyOptions({ color: palette.line });
+  if (state.priceLine) {
+    try { state.priceLine.applyOptions({ color: palette.line }); } catch (_) {}
+  }
+  return palette;
 }
 
 function installChartScaleStyles() {
@@ -140,6 +196,9 @@ function resetChartForMarketSwitch(symbol = state.symbol) {
   state.lastQuoteAt = 0;
   state.lastCompletedCandleTime = 0;
   state.currentCandleTime = 0;
+  liveCandleOpenPrice = null;
+  liveCandleDirection = 'neutral';
+  updateLiveDirectionVisual();
   appliedSymbolPriceFormat = '';
   applySymbolPriceFormat(symbol);
 
@@ -184,3 +243,4 @@ function fitCurrentMarket({ fitTime = true } = {}) {
 
 installChartScaleStyles();
 applySymbolPriceFormat(state.symbol);
+updateLiveDirectionVisual();
