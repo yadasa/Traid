@@ -263,7 +263,8 @@ async function syncCompletedHistoryToLive({ force = false } = {}) {
   const expectedSeconds = TIMEFRAME_SECONDS[timeframe] || 60;
   const completedTime = Number(state.lastCompletedCandleTime || 0);
   const liveTime = Number(state.currentCandleTime || 0);
-  const missingHistory = liveTime > 0 && completedTime <= 0;
+  const initialHistoryLoad = completedTime <= 0;
+  const missingHistory = liveTime > 0 && initialHistoryLoad;
   const hasGap = liveTime > 0 && (
     missingHistory || liveTime - completedTime > expectedSeconds * 1.1
   );
@@ -285,7 +286,11 @@ async function syncCompletedHistoryToLive({ force = false } = {}) {
     setHistory(rows);
     renderPriorForecasts();
     positionForecastBoundary();
-    if (typeof fitCurrentMarket === 'function') fitCurrentMarket();
+    if (typeof fitCurrentMarket === 'function') {
+      // A first history load may fit the chart only until the user zooms or pans.
+      // Later gap repairs update price autoscaling without touching the time axis.
+      fitCurrentMarket({ fitTime: initialHistoryLoad });
+    }
   } catch (error) {
     console.warn('Could not backfill completed candles.', error);
   } finally {
