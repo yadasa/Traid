@@ -38,6 +38,7 @@ let liveCandleGlowResizeObserver = null;
 let chartViewportUserControlled = false;
 let chartViewportLastInteractionAt = 0;
 let chartViewportGuardInstalled = false;
+let liveCandleFunctionGuardsInstalled = false;
 
 function quotePrecision(quote) {
   const explicit = Number(quote?.digits ?? quote?.precision);
@@ -189,6 +190,26 @@ function updateLiveDirectionVisual(row = null, quote = null) {
   }
   requestAnimationFrame(positionLiveCandleGlow);
   return palette;
+}
+
+function installLiveCandleFunctionGuards() {
+  if (liveCandleFunctionGuardsInstalled) return;
+  liveCandleFunctionGuardsInstalled = true;
+
+  const baseSetCurrent = setCurrent;
+  setCurrent = function guardedSetCurrent(row, ...args) {
+    if (!row) clearLiveCandleGlow();
+    const result = baseSetCurrent.call(this, row, ...args);
+    requestAnimationFrame(positionLiveCandleGlow);
+    return result;
+  };
+
+  const baseApplyChartType = applyChartType;
+  applyChartType = function guardedApplyChartType(...args) {
+    const result = baseApplyChartType.apply(this, args);
+    requestAnimationFrame(positionLiveCandleGlow);
+    return result;
+  };
 }
 
 function markChartViewportInteraction() {
@@ -477,6 +498,7 @@ function fitCurrentMarket({ fitTime = true, forceTime = false } = {}) {
 
 installChartScaleStyles();
 installChartViewportGuard();
+installLiveCandleFunctionGuards();
 applySymbolPriceFormat(state.symbol);
 ensureLiveCandleGlow();
 updateLiveDirectionVisual();
