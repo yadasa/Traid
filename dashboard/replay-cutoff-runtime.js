@@ -1,7 +1,8 @@
 (() => {
   const TIME_MODE_KEY = 'traid.chart.timeMode';
+  const ERROR_UNIT_KEY = 'traid.replay.errorUnit';
   const LOCAL_TIME_ZONE = 'America/Chicago';
-  const PREVIEW_LIMIT = 1000;
+  const PREVIEW_LIMIT = 5000;
   let selectedCutoffISO = null;
   let pickerActive = false;
   let pickerTimes = [];
@@ -9,6 +10,7 @@
   let dragPointerId = null;
   let installed = false;
   let replayStatsPatched = false;
+  let errorUnit = localStorage.getItem(ERROR_UNIT_KEY) === 'atr' ? 'atr' : 'percent';
 
   const timeframeSeconds = Object.freeze({
     '1m': 60,
@@ -64,8 +66,6 @@
     const targetWallClockAsUTC = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
     let guess = targetWallClockAsUTC;
 
-    // Convert an IANA-zone wall clock to an instant without relying on the
-    // browser/OS timezone. A second pass handles DST offset changes cleanly.
     for (let pass = 0; pass < 3; pass += 1) {
       const represented = zoneParts(new Date(guess), timeZone);
       const representedAsUTC = Date.UTC(
@@ -187,6 +187,127 @@
     } catch (_) {}
   }
 
+  function wilderAtr14FromHistory(rows) {
+    const history = historicalReplayRows(rows);
+    if (history.length < 14) return null;
+    const trueRanges = [];
+    for (let index = 0; index < history.length; index += 1) {
+      const row = history[index];
+      const previousClose = index > 0 ? Number(history[index - 1].close) : null;
+      const high = Number(row.high);
+      const low = Number(row.low);
+      if (![high, low].every(Number.isFinite)) continue;
+      let range = high - low;
+      if (Number.isFinite(previousClose)) {
+        range = Math.max(range, Math.abs(high - previousClose), Math.abs(low - previousClose));
+      }
+      if (Number.isFinite(range)) trueRanges.push(range);
+    }
+    if (trueRanges.length < 14) return null;
+    let atr = trueRanges.slice(0, 14).reduce((sum, value) => sum + value, 0) / 14;
+    for (const value of trueRanges.slice(14)) {
+      atr = (atr * 13 + value) / 14;
+    }
+    return Number.isFinite(atr) && atr > 0 ? atr : null;
+  }
+
+  function replayCutoffAtr(payload = historicalReplayPayload) {
+    const backend = Number(payload?.cutoff_atr14);
+    if (Number.isFinite(backend) && backend > 0) return backend;
+    return wilderAtr14FromHistory(payload?.history || []);
+  }
+
+  function updateErrorToggleState() {
+    document.querySelectorAll('#historicalReplayErrorToggle button').forEach(button => {
+      button.classList.toggle('active', button.dataset.errorUnit === errorUnit);
+    });
+  }
+
+  function updateErrorMetricDisplay() {
+    const stat = document.getElementById('historicalReplayErrorStat');
+    const detail = document.getElementById('historicalReplayErrorDetail');
+    if (!stat) return;
+    updateErrorToggleState();
+
+    const payload = historicalReplayPayload;
+    const atr = replayCutoffAtr(payload);
+    if (detail) {
+      detail.textContent = Number.isFinite(atr)
+        ? `ATR-14 ${historicalReplayFormatPrice(atr)} · frozen at cutoff`
+        : 'ATR-14 unavailable at this cutoff';
+    }
+    if (!payload) {
+      stat.textContent = '—';
+      return;
+    }
+
+    const actual = historicalReplayRows(payload.actual);
+    const forecast = historicalReplayRows(payload.projection);
+    const revealedIndex = historicalReplayIndex - 1;
+    if (revealedIndex < 0 || !actual[revealedIndex] || !forecast[revealedIndex]) {
+      stat.textContent = '—';
+      return;
+    }
+
+    const observed = Number(actual[revealedIndex].close);
+    const predicted = Number(forecast[revealedIndex].close);
+    const absoluteError = Math.abs(predicted - observed);
+    if (errorUnit === 'atr') {
+      stat.textContent = Number.isFinite(atr) && atr > 0
+        ? `${(absoluteError / atr).toFixed(3)} ATR`
+        : '—';
+      return;
+    }
+    const percentError = absoluteError / Math.max(Math.abs(observed), 1e-12) * 100;
+    stat.textContent = `${percentError.toFixed(3)}%`;
+  }
+
+  function installErrorMetricToggle() {
+    const stat = document.getElementById('historicalReplayErrorStat');
+    const card = stat?.closest('article');
+    if (!stat || !card || document.getElementById('historicalReplayErrorToggle')) return;
+    card.classList.add('historical-replay-error-card');
+
+    const toggle = document.createElement('div');
+    toggle.id = 'historicalReplayErrorToggle';
+    toggle.className = 'historical-replay-error-toggle';
+    toggle.setAttribute('role', 'group');
+    toggle.setAttribute('aria-label', 'Replay close error unit');
+    toggle.innerHTML = '<button type="button" data-error-unit="percent">%</button><button type="button" data-error-unit="atr">ATR</button>';
+    card.appendChild(toggle);
+
+    const detail = document.createElement('small');
+    detail.id = 'historicalReplayErrorDetail';
+    detail.className = 'historical-replay-error-detail';
+    detail.textContent = 'ATR-14 frozen at cutoff';
+    card.appendChild(detail);
+
+    toggle.addEventListener('click', event => {
+      const button = event.target.closest('button[data-error-unit]');
+      if (!button) return;
+      errorUnit = button.dataset.errorUnit === 'atr' ? 'atr' : 'percent';
+      localStorage.setItem(ERROR_UNIT_KEY, errorUnit);
+      updateErrorMetricDisplay();
+    });
+    updateErrorMetricDisplay();
+  }
+
+  function clearReplayResultForPicker() {
+    historicalReplayPause();
+    historicalReplayPayload = null;
+    historicalReplayIndex = 0;
+    ['historicalReplayPlay', 'historicalReplayStep', 'historicalReplayReset'].forEach(id => {
+      const button = document.getElementById(id);
+      if (button) button.disabled = true;
+    });
+    ['historicalReplayCutoffStat', 'historicalReplayContextStat', 'historicalReplayForecastStat', 'historicalReplayErrorStat'].forEach(id => {
+      const node = document.getElementById(id);
+      if (node) node.textContent = '—';
+    });
+    const detail = document.getElementById('historicalReplayErrorDetail');
+    if (detail) detail.textContent = 'ATR-14 frozen at cutoff';
+  }
+
   function installStyles() {
     if (document.getElementById('historicalReplayCutoffPickerStyles')) return;
     const style = document.createElement('style');
@@ -304,11 +425,51 @@
         border-radius:12px !important;
         background:rgba(8,12,29,.52) !important;
       }
+      .replay-stats article.historical-replay-error-card {
+        position:relative;
+        padding-right:98px !important;
+      }
       .replay-stats span { font-size:9px !important; }
       .replay-stats strong {
         margin-top:7px !important;
         font-size:16px !important;
         font-variant-numeric:tabular-nums;
+      }
+      .historical-replay-error-toggle {
+        position:absolute;
+        right:10px;
+        top:10px;
+        display:flex;
+        align-items:center;
+        padding:2px;
+        gap:2px;
+        border:1px solid rgba(139,158,213,.16);
+        border-radius:7px;
+        background:rgba(5,8,22,.66);
+      }
+      .historical-replay-error-toggle button {
+        min-width:31px;
+        height:24px;
+        padding:0 7px;
+        border:0;
+        border-radius:5px;
+        background:transparent;
+        color:#7f8baa;
+        font:800 9px/1 system-ui,sans-serif;
+        cursor:pointer;
+      }
+      .historical-replay-error-toggle button.active {
+        color:#e0e7ff;
+        background:rgba(99,102,241,.24);
+        box-shadow:inset 0 0 0 1px rgba(129,140,248,.22);
+      }
+      .historical-replay-error-detail {
+        display:block;
+        margin-top:5px;
+        color:#7884a4;
+        font-size:9px;
+        line-height:1.25;
+        white-space:nowrap;
       }
       .historical-replay-chart-wrap {
         height:350px !important;
@@ -370,6 +531,7 @@
         .historical-replay-controls .primary-button { grid-column:1/-1; }
         .historical-replay-pick-button { grid-column:auto !important; }
         .historical-replay-chart-wrap { height:300px !important; }
+        .replay-stats article.historical-replay-error-card { padding-right:88px !important; }
       }
     `;
     document.head.appendChild(style);
@@ -523,16 +685,21 @@
     requestAnimationFrame(() => positionMarker());
   }
 
-  async function loadPickerPreview() {
+  async function loadPickerPreview({ replayWasCleared = false } = {}) {
     const key = `${state.symbol}:${state.timeframe}`;
     setProgress(`Loading ${state.symbol} ${state.timeframe} completed candles…`, 'working');
     const payload = await api(`/v1/candles/${encodeURIComponent(state.symbol)}?timeframe=${encodeURIComponent(state.timeframe)}&limit=${PREVIEW_LIMIT}`);
     pickerMarketKey = key;
     buildPreviewChart(payload.candles || []);
-    setProgress(`Drag the separator to choose the simulated present · ${displayTime(selectedCutoffISO)}`);
+    setProgress(
+      replayWasCleared
+        ? `Replay cleared · full completed history restored · drag the separator · ${displayTime(selectedCutoffISO)}`
+        : `Drag the separator to choose the simulated present · ${displayTime(selectedCutoffISO)}`,
+    );
   }
 
   async function togglePicker() {
+    const hadReplay = Boolean(historicalReplayPayload);
     pickerActive = !pickerActive;
     const button = document.getElementById('historicalReplayPick');
     const wrap = document.querySelector('.historical-replay-chart-wrap');
@@ -541,7 +708,10 @@
     wrap?.classList.toggle('cutoff-picking', pickerActive);
     if (!pickerActive) return;
     try {
-      if (pickerMarketKey !== `${state.symbol}:${state.timeframe}` || !historicalReplayChart || !pickerTimes.length) {
+      if (hadReplay) {
+        clearReplayResultForPicker();
+        await loadPickerPreview({ replayWasCleared: true });
+      } else if (pickerMarketKey !== `${state.symbol}:${state.timeframe}` || !historicalReplayChart || !pickerTimes.length) {
         await loadPickerPreview();
       } else {
         positionMarker();
@@ -609,6 +779,7 @@
       ].map(row => unixSeconds(row.timestamp)).filter(Number.isFinite).sort((a, b) => a - b);
       historicalReplayChart?.timeScale().subscribeVisibleLogicalRangeChange(() => requestAnimationFrame(() => positionMarker()));
       historicalReplayUpdateStats();
+      updateErrorMetricDisplay();
       requestAnimationFrame(() => positionMarker());
       document.getElementById('historicalReplayReset').disabled = false;
       const seconds = Number(payload.inference_ms || 0) / 1000;
@@ -635,7 +806,10 @@
     historicalReplayUpdateStats = function patchedHistoricalReplayUpdateStats(...args) {
       const result = base.apply(this, args);
       const payload = historicalReplayPayload;
-      if (!payload) return result;
+      if (!payload) {
+        updateErrorMetricDisplay();
+        return result;
+      }
 
       const cutoffStat = document.getElementById('historicalReplayCutoffStat');
       if (cutoffStat) cutoffStat.textContent = displayTime(payload.cutoff_timestamp, true);
@@ -645,6 +819,7 @@
       if (progress && historicalReplayIndex === 0 && !progress.classList.contains('working') && !progress.classList.contains('error')) {
         progress.textContent = `${actual.length}/${payload.projection_candles || payload.projection?.length || 0} realized candles available · forecast frozen at ${displayTime(payload.cutoff_timestamp)}`;
       }
+      updateErrorMetricDisplay();
       return result;
     };
   }
@@ -708,10 +883,12 @@
     }
     installStyles();
     installStatsTimePatch();
+    installErrorMetricToggle();
     if (!installControls()) {
       setTimeout(initialize, 70);
       return;
     }
+    installErrorMetricToggle();
     installed = true;
     window.addEventListener('traid-chart-time-mode', handleTimeModeChange);
   }
