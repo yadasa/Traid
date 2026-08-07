@@ -1,6 +1,7 @@
 (() => {
   const NativeFetch = window.fetch.bind(window);
   const NativeWebSocket = window.WebSocket;
+  const runtimeUrl = document.currentScript?.src || window.location.href;
   let latestPayload = null;
   let renderTimer = null;
 
@@ -169,4 +170,25 @@
     }
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  // Load the historical replay only after the base dashboard has completed its
+  // own wireUI() pass. Loading it earlier would remove the legacy #runReplay node
+  // while the base app is still trying to attach its handler.
+  function loadHistoricalReplayWhenReady() {
+    if (document.querySelector('script[data-traid-historical-replay]')) return;
+    const legacyReplayButton = document.getElementById('runReplay');
+    const replayPanel = document.querySelector('[data-content="replay"]');
+    if (!legacyReplayButton || typeof legacyReplayButton.onclick !== 'function' || !replayPanel) {
+      setTimeout(loadHistoricalReplayWhenReady, 60);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.dataset.traidHistoricalReplay = 'true';
+    script.src = new URL('./historical-replay-runtime.js', runtimeUrl).href;
+    script.onerror = () => console.error('Could not load historical-replay-runtime.js');
+    document.head.appendChild(script);
+  }
+
+  setTimeout(loadHistoricalReplayWhenReady, 0);
 })();
