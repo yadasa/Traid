@@ -1,5 +1,6 @@
 (() => {
   const TIME_MODE_KEY = 'traid.chart.timeMode';
+  const LOCAL_TIME_ZONE = 'America/Chicago';
   const PREVIEW_LIMIT = 1000;
   let selectedCutoffISO = null;
   let pickerActive = false;
@@ -7,6 +8,7 @@
   let pickerMarketKey = '';
   let dragPointerId = null;
   let installed = false;
+  let replayStatsPatched = false;
 
   const timeframeSeconds = Object.freeze({
     '1m': 60,
@@ -22,52 +24,167 @@
     return localStorage.getItem(TIME_MODE_KEY) === 'local' ? 'local' : 'utc';
   }
 
+  function effectiveZone() {
+    return timeMode() === 'local' ? LOCAL_TIME_ZONE : 'UTC';
+  }
+
   function pad(value) {
     return String(value).padStart(2, '0');
+  }
+
+  function zoneParts(date, timeZone = effectiveZone()) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date);
+    const values = {};
+    for (const part of parts) {
+      if (part.type !== 'literal') values[part.type] = Number(part.value);
+    }
+    return values;
   }
 
   function isoToInput(iso) {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return '';
-    if (timeMode() === 'local') {
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const parts = zoneParts(date);
+    return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+  }
+
+  function wallTimeToISO(value, timeZone) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+    if (!match) return null;
+    const [, year, month, day, hour, minute] = match.map(Number);
+    const targetWallClockAsUTC = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+    let guess = targetWallClockAsUTC;
+
+    // Convert an IANA-zone wall clock to an instant without relying on the
+    // browser/OS timezone. A second pass handles DST offset changes cleanly.
+    for (let pass = 0; pass < 3; pass += 1) {
+      const represented = zoneParts(new Date(guess), timeZone);
+      const representedAsUTC = Date.UTC(
+        represented.year,
+        represented.month - 1,
+        represented.day,
+        represented.hour,
+        represented.minute,
+        represented.second || 0,
+      );
+      const delta = representedAsUTC - targetWallClockAsUTC;
+      if (Math.abs(delta) < 1000) break;
+      guess -= delta;
     }
-    return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+    const parsed = new Date(guess);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   }
 
   function inputToISO(value) {
     if (!value) return null;
-    const parsed = timeMode() === 'local'
-      ? new Date(value)
-      : new Date(`${value}:00Z`);
+    if (timeMode() === 'local') return wallTimeToISO(value, LOCAL_TIME_ZONE);
+    const parsed = new Date(`${value}:00Z`);
     return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
   }
 
-  function displayTime(iso) {
+  function displayTime(iso, includeYear = false) {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return '—';
-    return date.toLocaleString(undefined, timeMode() === 'utc'
-      ? { timeZone: 'UTC', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
-      : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: effectiveZone(),
+      month: 'short',
+      day: 'numeric',
+      ...(includeYear ? { year: 'numeric' } : {}),
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).format(date);
   }
 
   function defaultCutoffISO() {
     const seconds = timeframeSeconds[state.timeframe] || 300;
     const horizon = Math.max(1, Number(document.getElementById('historicalReplayHorizon')?.value || 24));
-    const barsBack = Math.max(120, horizon + 2);
+    const barsBack = Math.max(24, horizon + 1);
     const timestamp = Math.floor((Date.now() / 1000 - barsBack * seconds) / seconds) * seconds;
     return new Date(timestamp * 1000).toISOString();
   }
 
+  function setProgress(message, tone = '') {
+    const progress = document.getElementById('historicalReplayProgress');
+    if (!progress) return;
+    progress.textContent = message;
+    progress.classList.remove('error', 'success', 'working');
+    if (tone) progress.classList.add(tone);
+  }
+
   function updateZoneBadge() {
     const badge = document.getElementById('historicalReplayZoneBadge');
-    if (badge) badge.textContent = timeMode() === 'local' ? 'LOCAL' : 'UTC';
+    if (!badge) return;
+    badge.textContent = timeMode() === 'local' ? 'CT' : 'UTC';
+    badge.title = timeMode() === 'local'
+      ? 'Houston local time · America/Chicago'
+      : 'Coordinated Universal Time';
   }
 
   function updateInputFromSelection() {
     const input = document.getElementById('historicalReplayDateTime');
-    if (input && selectedCutoffISO) input.value = isoToInput(selectedCutoffISO);
+    if (input && selectedCutoffISO) {
+      input.value = isoToInput(selectedCutoffISO);
+      input.max = isoToInput(new Date().toISOString());
+    }
     updateZoneBadge();
+  }
+
+  function dateForChartTime(time) {
+    if (typeof time === 'number') return new Date(time * 1000);
+    if (typeof time === 'string') return new Date(time);
+    if (time && typeof time === 'object' && Number.isFinite(time.year)) {
+      return new Date(Date.UTC(time.year, Number(time.month || 1) - 1, Number(time.day || 1)));
+    }
+    return new Date(NaN);
+  }
+
+  function replayTickFormatter(time, tickMarkType) {
+    const date = dateForChartTime(time);
+    if (Number.isNaN(date.getTime())) return '';
+    const options = { timeZone: effectiveZone() };
+    if (tickMarkType === 0) options.year = 'numeric';
+    else if (tickMarkType === 1) options.month = 'short';
+    else if (tickMarkType === 2) { options.month = 'short'; options.day = 'numeric'; }
+    else { options.hour = 'numeric'; options.minute = '2-digit'; }
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  }
+
+  function replayCrosshairFormatter(time) {
+    const date = dateForChartTime(time);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: effectiveZone(),
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short',
+    }).format(date);
+  }
+
+  function applyReplayChartTimeZone() {
+    if (!historicalReplayChart) return;
+    try {
+      historicalReplayChart.applyOptions({
+        localization: {
+          locale: navigator.language || 'en-US',
+          timeFormatter: replayCrosshairFormatter,
+        },
+      });
+      historicalReplayChart.timeScale().applyOptions({ tickMarkFormatter: replayTickFormatter });
+    } catch (_) {}
   }
 
   function installStyles() {
@@ -75,47 +192,184 @@
     const style = document.createElement('style');
     style.id = 'historicalReplayCutoffPickerStyles';
     style.textContent = `
+      #analysisTabs button { font-size:11px !important; }
+      .tab-content[data-content="replay"] { padding:18px 18px 22px !important; }
+      .historical-replay-shell { gap:15px !important; }
+      .historical-replay-copy {
+        padding:2px 2px 0;
+        align-items:center !important;
+      }
+      .historical-replay-copy h3 {
+        font-size:18px !important;
+        letter-spacing:-.02em;
+      }
+      .historical-replay-copy p {
+        margin-top:6px !important;
+        max-width:920px !important;
+        font-size:12px !important;
+        line-height:1.55 !important;
+        color:#99a5c5 !important;
+      }
+      .historical-replay-controls {
+        display:grid !important;
+        grid-template-columns:minmax(280px,1.45fr) minmax(140px,.45fr) auto auto !important;
+        gap:10px !important;
+        align-items:end !important;
+        padding:14px !important;
+        border:1px solid rgba(139,158,213,.15);
+        border-radius:13px;
+        background:linear-gradient(135deg,rgba(13,20,43,.78),rgba(9,13,31,.62));
+      }
       .historical-replay-controls .legacy-candles-cutoff { display:none !important; }
+      .historical-replay-controls label,
+      .historical-replay-speed {
+        display:grid;
+        gap:7px !important;
+        color:#a8b3d2 !important;
+        font-size:11px !important;
+        font-weight:750 !important;
+        letter-spacing:.015em !important;
+      }
+      .historical-replay-controls input,
+      .historical-replay-speed select {
+        width:100%;
+        height:44px !important;
+        font-size:13px !important;
+        font-weight:650;
+      }
+      .historical-replay-controls .primary-button,
+      .historical-replay-pick-button {
+        min-height:44px !important;
+        padding:0 17px !important;
+        font-size:12px !important;
+        white-space:nowrap;
+      }
       .historical-replay-time-field { position:relative; }
       .historical-replay-time-field .replay-zone-badge {
-        position:absolute; right:9px; bottom:10px; pointer-events:none;
-        color:#9fb0d8; font-size:7px; font-weight:850; letter-spacing:.08em;
+        position:absolute; right:12px; bottom:14px; pointer-events:none;
+        color:#bfdbfe; font-size:9px; font-weight:900; letter-spacing:.08em;
       }
-      #historicalReplayDateTime { padding-right:48px; }
+      #historicalReplayDateTime { padding-right:52px !important; }
       .historical-replay-pick-button.active {
         border-color:rgba(96,165,250,.55) !important;
         background:rgba(59,130,246,.14) !important;
         color:#dbeafe !important;
       }
+      .historical-replay-transport {
+        display:flex !important;
+        align-items:end !important;
+        flex-wrap:wrap;
+        gap:9px !important;
+        padding:12px 14px !important;
+        border:1px solid rgba(139,158,213,.13) !important;
+        border-radius:12px;
+        background:rgba(8,12,29,.55);
+      }
+      .historical-replay-transport .ghost-button {
+        min-width:96px !important;
+        min-height:40px !important;
+        font-size:11px !important;
+      }
+      .historical-replay-speed { width:120px !important; }
+      .historical-replay-progress {
+        margin-left:auto !important;
+        align-self:center !important;
+        max-width:min(680px,48vw);
+        padding:7px 10px;
+        border-radius:8px;
+        color:#aeb9d6 !important;
+        font-size:11px !important;
+        line-height:1.4;
+        font-variant-numeric:tabular-nums;
+      }
+      .historical-replay-progress.error {
+        color:#fecdd3 !important;
+        background:rgba(190,24,93,.10);
+        border:1px solid rgba(251,113,133,.20);
+      }
+      .historical-replay-progress.success {
+        color:#bbf7d0 !important;
+        background:rgba(16,185,129,.08);
+        border:1px solid rgba(45,212,191,.17);
+      }
+      .historical-replay-progress.working {
+        color:#bfdbfe !important;
+        background:rgba(59,130,246,.08);
+        border:1px solid rgba(96,165,250,.16);
+      }
+      .replay-stats { gap:10px !important; }
+      .replay-stats article {
+        padding:14px 16px !important;
+        min-height:76px;
+        border-radius:12px !important;
+        background:rgba(8,12,29,.52) !important;
+      }
+      .replay-stats span { font-size:9px !important; }
+      .replay-stats strong {
+        margin-top:7px !important;
+        font-size:16px !important;
+        font-variant-numeric:tabular-nums;
+      }
+      .historical-replay-chart-wrap {
+        height:350px !important;
+        min-height:280px !important;
+        border-radius:13px !important;
+        border-color:rgba(139,158,213,.16) !important;
+      }
+      .historical-replay-legend {
+        left:12px !important;
+        top:10px !important;
+        gap:12px !important;
+        padding:7px 9px !important;
+        border-radius:8px !important;
+        font-size:10px !important;
+      }
+      .historical-replay-note {
+        padding:10px 12px !important;
+        border-radius:10px !important;
+        font-size:10px !important;
+        line-height:1.55 !important;
+      }
       .historical-replay-cutoff-marker {
-        position:absolute; z-index:8; top:0; bottom:0; width:14px;
-        transform:translateX(-7px); cursor:ew-resize; touch-action:none;
+        position:absolute; z-index:8; top:0; bottom:0; width:18px;
+        transform:translateX(-9px); cursor:ew-resize; touch-action:none;
         display:none; pointer-events:auto;
       }
       .historical-replay-cutoff-marker::before {
-        content:''; position:absolute; left:6px; top:0; bottom:0; width:2px;
-        background:linear-gradient(180deg,#60a5fa,#a855f7 52%,#d946ef);
-        box-shadow:0 0 7px rgba(96,165,250,.58),0 0 13px rgba(168,85,247,.40);
+        content:''; position:absolute; left:8px; top:0; bottom:0; width:2px;
+        background:linear-gradient(180deg,#60a5fa,#8b5cf6 52%,#d946ef);
+        box-shadow:0 0 8px rgba(96,165,250,.62),0 0 16px rgba(139,92,246,.43);
       }
       .historical-replay-cutoff-marker.dragging::before {
-        width:3px; left:5.5px; box-shadow:0 0 9px rgba(96,165,250,.82),0 0 18px rgba(168,85,247,.55);
+        width:3px; left:7.5px; box-shadow:0 0 10px rgba(96,165,250,.86),0 0 20px rgba(139,92,246,.58);
       }
       .historical-replay-cutoff-label {
-        position:absolute; top:8px; color:#f8fafc; font-size:8px; font-weight:850;
-        letter-spacing:.08em; white-space:nowrap; pointer-events:none;
-        text-shadow:0 1px 4px rgba(0,0,0,.8);
+        position:absolute; top:12px; color:#f8fafc; font-size:10px; font-weight:900;
+        letter-spacing:.09em; white-space:nowrap; pointer-events:none;
+        text-shadow:0 1px 5px rgba(0,0,0,.9);
       }
-      .historical-replay-cutoff-label.real { right:16px; }
-      .historical-replay-cutoff-label.forecast { left:16px; }
+      .historical-replay-cutoff-label.real { right:20px; }
+      .historical-replay-cutoff-label.forecast { left:20px; }
       .historical-replay-pick-hint {
-        position:absolute; z-index:7; right:10px; top:8px; display:none;
-        padding:5px 7px; border:1px solid rgba(96,165,250,.22); border-radius:7px;
-        background:rgba(7,11,27,.84); color:#aab6d4; font-size:8px; pointer-events:none;
+        position:absolute; z-index:7; right:12px; top:10px; display:none;
+        padding:7px 9px; border:1px solid rgba(96,165,250,.22); border-radius:8px;
+        background:rgba(7,11,27,.88); color:#c3cee8; font-size:10px; pointer-events:none;
       }
       .historical-replay-chart-wrap.cutoff-picking .historical-replay-pick-hint { display:block; }
       .historical-replay-chart-wrap.cutoff-picking { cursor:crosshair; }
+      @media (max-width:1050px) {
+        .historical-replay-controls {
+          grid-template-columns:minmax(240px,1fr) minmax(120px,.45fr) auto !important;
+        }
+        .historical-replay-controls .primary-button { grid-column:1/-1; }
+        .historical-replay-progress { width:100%; max-width:none; margin-left:0 !important; }
+      }
       @media (max-width:700px) {
+        .tab-content[data-content="replay"] { padding:12px !important; }
+        .historical-replay-controls { grid-template-columns:1fr 1fr !important; }
+        .historical-replay-controls .primary-button { grid-column:1/-1; }
         .historical-replay-pick-button { grid-column:auto !important; }
+        .historical-replay-chart-wrap { height:300px !important; }
       }
     `;
     document.head.appendChild(style);
@@ -204,8 +458,7 @@
     selectedCutoffISO = new Date(snapped * 1000).toISOString();
     if (updateInput) updateInputFromSelection();
     positionMarker(selectedCutoffISO);
-    const progress = document.getElementById('historicalReplayProgress');
-    if (progress && pickerActive) progress.textContent = `Cutoff selected · ${displayTime(selectedCutoffISO)} · generate to test`;
+    if (pickerActive) setProgress(`Cutoff selected · ${displayTime(selectedCutoffISO)} · generate to test`);
   }
 
   function updateCutoffFromPointer(event) {
@@ -234,10 +487,11 @@
 
     historicalReplayChart = LightweightCharts.createChart(node, {
       autoSize: true,
-      layout: { background: { type: 'solid', color: '#070b1b' }, textColor: '#7f8aa8', attributionLogo: false },
+      layout: { background: { type: 'solid', color: '#070b1b' }, textColor: '#8f9bb9', attributionLogo: false },
       grid: { vertLines: { color: 'rgba(139,158,213,.045)' }, horzLines: { color: 'rgba(139,158,213,.045)' } },
       rightPriceScale: { borderColor: 'rgba(139,158,213,.13)', scaleMargins: { top: .08, bottom: .10 } },
-      timeScale: { borderColor: 'rgba(139,158,213,.13)', timeVisible: true, secondsVisible: false, rightOffset: 5, barSpacing: 6 },
+      timeScale: { borderColor: 'rgba(139,158,213,.13)', timeVisible: true, secondsVisible: false, rightOffset: 5, barSpacing: 6, tickMarkFormatter: replayTickFormatter },
+      localization: { locale: navigator.language || 'en-US', timeFormatter: replayCrosshairFormatter },
       crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     });
 
@@ -271,12 +525,11 @@
 
   async function loadPickerPreview() {
     const key = `${state.symbol}:${state.timeframe}`;
-    const progress = document.getElementById('historicalReplayProgress');
-    if (progress) progress.textContent = `Loading ${state.symbol} ${state.timeframe} completed candles…`;
+    setProgress(`Loading ${state.symbol} ${state.timeframe} completed candles…`, 'working');
     const payload = await api(`/v1/candles/${encodeURIComponent(state.symbol)}?timeframe=${encodeURIComponent(state.timeframe)}&limit=${PREVIEW_LIMIT}`);
     pickerMarketKey = key;
     buildPreviewChart(payload.candles || []);
-    if (progress) progress.textContent = `Drag the separator to choose the simulated present · ${displayTime(selectedCutoffISO)}`;
+    setProgress(`Drag the separator to choose the simulated present · ${displayTime(selectedCutoffISO)}`);
   }
 
   async function togglePicker() {
@@ -298,6 +551,7 @@
       button?.classList.remove('active');
       if (button) button.textContent = 'Pick on chart';
       wrap?.classList.remove('cutoff-picking');
+      setProgress(error.message, 'error');
       toast(error.message, 'error');
     }
   }
@@ -314,6 +568,11 @@
       toast('Choose a replay date and time first.', 'error');
       return;
     }
+    if (Date.parse(selectedCutoffISO) > Date.now() + 60000) {
+      setProgress('Replay cutoff must be in the past.', 'error');
+      toast('Replay cutoff must be in the past.', 'error');
+      return;
+    }
 
     const horizon = Math.max(1, Math.min(200, Number(horizonInput.value) || 24));
     horizonInput.value = String(horizon);
@@ -322,8 +581,7 @@
     historicalReplayIndex = 0;
     generate.disabled = true;
     generate.textContent = 'Running Kronos…';
-    const progress = document.getElementById('historicalReplayProgress');
-    if (progress) progress.textContent = `Freezing ${state.symbol} ${state.timeframe} at ${displayTime(selectedCutoffISO)}…`;
+    setProgress(`Freezing ${state.symbol} ${state.timeframe} at ${displayTime(selectedCutoffISO)}…`, 'working');
     ['historicalReplayPlay', 'historicalReplayStep', 'historicalReplayReset'].forEach(id => {
       const button = document.getElementById(id);
       if (button) button.disabled = true;
@@ -344,6 +602,7 @@
       selectedCutoffISO = payload.cutoff_timestamp || selectedCutoffISO;
       updateInputFromSelection();
       historicalReplayBuildChart(payload);
+      applyReplayChartTimeZone();
       pickerTimes = [
         ...historicalReplayRows(payload.history),
         ...historicalReplayRows(payload.actual),
@@ -353,14 +612,41 @@
       requestAnimationFrame(() => positionMarker());
       document.getElementById('historicalReplayReset').disabled = false;
       const seconds = Number(payload.inference_ms || 0) / 1000;
+      const actualCount = Number(payload.available_actual_candles ?? payload.actual?.length ?? 0);
+      const projectionCount = Number(payload.projection_candles ?? horizon);
+      setProgress(
+        `${actualCount}/${projectionCount} realized candles currently available · forecast frozen at ${displayTime(payload.cutoff_timestamp)}`,
+        'success',
+      );
       toast(`Historical Kronos forecast ready in ${seconds.toFixed(1)}s.`, 'success');
     } catch (error) {
-      if (progress) progress.textContent = error.message;
+      setProgress(error.message, 'error');
       toast(error.message, 'error');
     } finally {
       generate.disabled = false;
       generate.textContent = 'Generate Kronos forecast';
     }
+  }
+
+  function installStatsTimePatch() {
+    if (replayStatsPatched || typeof historicalReplayUpdateStats !== 'function') return;
+    replayStatsPatched = true;
+    const base = historicalReplayUpdateStats;
+    historicalReplayUpdateStats = function patchedHistoricalReplayUpdateStats(...args) {
+      const result = base.apply(this, args);
+      const payload = historicalReplayPayload;
+      if (!payload) return result;
+
+      const cutoffStat = document.getElementById('historicalReplayCutoffStat');
+      if (cutoffStat) cutoffStat.textContent = displayTime(payload.cutoff_timestamp, true);
+
+      const actual = historicalReplayRows(payload.actual);
+      const progress = document.getElementById('historicalReplayProgress');
+      if (progress && historicalReplayIndex === 0 && !progress.classList.contains('working') && !progress.classList.contains('error')) {
+        progress.textContent = `${actual.length}/${payload.projection_candles || payload.projection?.length || 0} realized candles available · forecast frozen at ${displayTime(payload.cutoff_timestamp)}`;
+      }
+      return result;
+    };
   }
 
   function installControls() {
@@ -383,7 +669,6 @@
     pick.textContent = 'Pick on chart';
     controls.insertBefore(pick, oldGenerate);
 
-    // Replace the button to remove the legacy candles-ago click listener.
     const generate = oldGenerate.cloneNode(true);
     oldGenerate.replaceWith(generate);
     generate.addEventListener('click', generateAtExactTime);
@@ -396,8 +681,7 @@
       if (!iso) return;
       selectedCutoffISO = iso;
       positionMarker();
-      const progress = document.getElementById('historicalReplayProgress');
-      if (progress) progress.textContent = `Cutoff selected · ${displayTime(selectedCutoffISO)} · generate to test`;
+      setProgress(`Cutoff selected · ${displayTime(selectedCutoffISO)} · generate to test`);
     });
 
     const wrap = document.querySelector('.historical-replay-chart-wrap');
@@ -412,6 +696,8 @@
   function handleTimeModeChange() {
     if (!selectedCutoffISO) return;
     updateInputFromSelection();
+    applyReplayChartTimeZone();
+    historicalReplayUpdateStats?.();
   }
 
   function initialize() {
@@ -421,6 +707,7 @@
       return;
     }
     installStyles();
+    installStatsTimePatch();
     if (!installControls()) {
       setTimeout(initialize, 70);
       return;
