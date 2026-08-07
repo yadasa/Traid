@@ -25,6 +25,7 @@ class KronosReplayRequest(BaseModel):
     cutoff_timestamp: datetime | None = None
     pred_len: int = Field(default=24, ge=1, le=200)
     advanced: bool = False
+    paths: int | None = Field(default=None, ge=3, le=25)
 
     @model_validator(mode="after")
     def require_cutoff(self):
@@ -86,9 +87,6 @@ class _HistoricalSnapshotProvider:
         return frame.tail(max(2, int(limit))).copy().reset_index(drop=True)
 
     def get_current_candle(self, symbol: str, timeframe: str) -> pd.DataFrame | None:
-        # Historical OHLC cannot reconstruct the exact partially formed candle that
-        # existed at the selected instant. Replay intentionally stops at the newest
-        # completed candle, as requested, and uses the live stack from there.
         normalize_symbol(symbol)
         get_timeframe(timeframe)
         return None
@@ -121,9 +119,6 @@ class _ReplayStore(PlatformStore):
         end: str | None = None,
         impact: str | None = None,
     ) -> list[dict[str, Any]]:
-        # The live ICT runtime asks for now +/- 3 hours. During Replay, "now" is the
-        # historical cutoff. Keeping this inside the isolated store avoids changing
-        # any global live-chart behavior or introducing a cross-request clock race.
         if start is not None or end is not None:
             start = (self.replay_cutoff - pd.Timedelta(hours=3)).isoformat()
             end = (self.replay_cutoff + pd.Timedelta(hours=3)).isoformat()
@@ -146,6 +141,7 @@ def _generate_with_live_stack(
     cutoff: pd.Timestamp,
     pred_len: int,
     advanced: bool,
+    paths: int | None,
 ) -> dict[str, Any]:
     """Call the exact ForecastPlatform.generate() currently used by the live chart."""
 
@@ -155,8 +151,6 @@ def _generate_with_live_stack(
             cutoff,
         )
         _copy_store(store, replay_store)
-        # backup() replaces the destination database contents, so restore the
-        # historical clock attribute after the copied PlatformStore state exists.
         replay_store.replay_cutoff = _as_utc(cutoff)
 
         snapshot_provider = _HistoricalSnapshotProvider(engine.provider, cutoff)
@@ -165,8 +159,6 @@ def _generate_with_live_stack(
             provider=snapshot_provider,
         )
 
-        # Replay must use the same loaded Kronos instance and serialization lock as
-        # the live chart, not a second model copy competing for GPU memory.
         snapshot_engine._predictor = engine.predictor
         snapshot_engine._model_lock = engine._model_lock
 
@@ -182,13 +174,10 @@ def _generate_with_live_stack(
             sample_count=NORMAL_SAMPLE_COUNT,
         )
 
-        # ForecastPlatform.generate is patched at startup by the exact same runtime
-        # chain used by the normal chart: sampled paths, price-only index features,
-        # trajectory integrity, ICT ranking, adaptive context, and HTF hierarchy.
         return replay_platform.generate(
             params,
             advanced=advanced,
-            paths=None,
+            paths=paths if advanced else None,
         )
 
 
@@ -201,15 +190,11 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
         engine = get_engine()
         timeframe = get_timeframe(payload.timeframe)
 
-        # Resolve the selected simulated present against completed candles on the
-        # requested chart timeframe. This dataset is also the realized playback
-        # source, but it is never passed into the historical snapshot platform.
-        requested = 5000
         candles = await asyncio.to_thread(
             engine.candles,
             canonical,
             payload.timeframe,
-            requested,
+            5000,
         )
         if candles is None or candles.empty:
             raise ValueError("No completed candles are available for replay.")
@@ -257,6 +242,7 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
             cutoff=simulated_present,
             pred_len=payload.pred_len,
             advanced=payload.advanced,
+            paths=payload.paths,
         )
         inference_ms = (time.perf_counter() - started) * 1000
 
