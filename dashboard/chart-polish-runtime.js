@@ -41,6 +41,10 @@
         will-change:opacity,filter;
         mix-blend-mode:screen;
       }
+      .traid-live-sharp-clone {
+        opacity:1;
+        filter:none;
+      }
       @keyframes traidGaussianLivePulse {
         0%,100% { opacity:.24; filter:brightness(.82); }
         50% { opacity:.82; filter:brightness(1.72); }
@@ -61,8 +65,10 @@
       wrap: document.querySelector('.chart-wrap'),
       chartNode: document.getElementById('chart'),
       svg: document.getElementById('traidLiveCandleClone'),
-      wick: document.getElementById('traidLiveCloneWick'),
-      body: document.getElementById('traidLiveCloneBody'),
+      glowWick: document.getElementById('traidLiveCloneWick'),
+      glowBody: document.getElementById('traidLiveCloneBody'),
+      sharpWick: document.getElementById('traidLiveSharpWick'),
+      sharpBody: document.getElementById('traidLiveSharpBody'),
     };
   }
 
@@ -93,24 +99,43 @@
     defs.appendChild(filter);
     svg.appendChild(defs);
 
+    // Glow copy first: this is the only group that gets Gaussian blur/pulsing.
     const pulse = document.createElementNS(ns, 'g');
     pulse.classList.add('traid-live-glow-pulse');
     const blurred = document.createElementNS(ns, 'g');
     blurred.setAttribute('filter', 'url(#traidLiveCandleGaussian)');
 
-    const wick = document.createElementNS(ns, 'line');
-    wick.id = 'traidLiveCloneWick';
-    wick.setAttribute('stroke-linecap', 'round');
-    wick.setAttribute('stroke-width', '3');
+    const glowWick = document.createElementNS(ns, 'line');
+    glowWick.id = 'traidLiveCloneWick';
+    glowWick.setAttribute('stroke-linecap', 'round');
+    glowWick.setAttribute('stroke-width', '3');
 
-    const body = document.createElementNS(ns, 'rect');
-    body.id = 'traidLiveCloneBody';
-    body.setAttribute('rx', '2');
-    body.setAttribute('ry', '2');
+    const glowBody = document.createElementNS(ns, 'rect');
+    glowBody.id = 'traidLiveCloneBody';
+    glowBody.setAttribute('rx', '2');
+    glowBody.setAttribute('ry', '2');
 
-    blurred.append(wick, body);
+    blurred.append(glowWick, glowBody);
     pulse.appendChild(blurred);
     svg.appendChild(pulse);
+
+    // Sharp copy second: drawing this after the blur makes the blurred candle
+    // visually sit behind the plain candle instead of washing across its face.
+    const sharp = document.createElementNS(ns, 'g');
+    sharp.classList.add('traid-live-sharp-clone');
+
+    const sharpWick = document.createElementNS(ns, 'line');
+    sharpWick.id = 'traidLiveSharpWick';
+    sharpWick.setAttribute('stroke-linecap', 'butt');
+    sharpWick.setAttribute('stroke-width', '1');
+
+    const sharpBody = document.createElementNS(ns, 'rect');
+    sharpBody.id = 'traidLiveSharpBody';
+    sharpBody.setAttribute('rx', '0');
+    sharpBody.setAttribute('ry', '0');
+
+    sharp.append(sharpWick, sharpBody);
+    svg.appendChild(sharp);
     wrap.appendChild(svg);
 
     try {
@@ -176,9 +201,6 @@
       if (Number.isFinite(candidate) && candidate > 0) barSpacing = candidate;
     } catch (_) {}
 
-    // Lightweight Charts expands candle bodies as bars are zoomed apart. The old
-    // 12px cap made a wide candle's glow look like a second wick. Track bar spacing
-    // instead so the blurred clone remains the same visual candle at every zoom.
     const sharpBodyWidth = Math.max(4, Math.min(180, barSpacing * .78));
     const glowPadX = Math.max(3, Math.min(10, sharpBodyWidth * .10));
     const glowPadY = 3.5;
@@ -189,23 +211,39 @@
     const sharpBodyHeight = Math.max(2, Math.abs(closeY - openY));
     const color = liveColor(row);
 
-    const wick = document.getElementById('traidLiveCloneWick');
-    const body = document.getElementById('traidLiveCloneBody');
-    if (!wick || !body) return;
+    const glowWick = document.getElementById('traidLiveCloneWick');
+    const glowBody = document.getElementById('traidLiveCloneBody');
+    const sharpWick = document.getElementById('traidLiveSharpWick');
+    const sharpBody = document.getElementById('traidLiveSharpBody');
+    if (!glowWick || !glowBody || !sharpWick || !sharpBody) return;
 
-    wick.setAttribute('x1', String(cx));
-    wick.setAttribute('x2', String(cx));
-    wick.setAttribute('y1', String(wickTop));
-    wick.setAttribute('y2', String(wickBottom));
-    wick.setAttribute('stroke', color);
+    glowWick.setAttribute('x1', String(cx));
+    glowWick.setAttribute('x2', String(cx));
+    glowWick.setAttribute('y1', String(wickTop));
+    glowWick.setAttribute('y2', String(wickBottom));
+    glowWick.setAttribute('stroke', color);
 
-    body.setAttribute('x', String(cx - sharpBodyWidth / 2 - glowPadX));
-    body.setAttribute('y', String(sharpBodyTop - glowPadY));
-    body.setAttribute('width', String(sharpBodyWidth + glowPadX * 2));
-    body.setAttribute('height', String(sharpBodyHeight + glowPadY * 2));
-    body.setAttribute('fill', color);
-    body.setAttribute('stroke', color);
-    body.setAttribute('stroke-width', '1.5');
+    glowBody.setAttribute('x', String(cx - sharpBodyWidth / 2 - glowPadX));
+    glowBody.setAttribute('y', String(sharpBodyTop - glowPadY));
+    glowBody.setAttribute('width', String(sharpBodyWidth + glowPadX * 2));
+    glowBody.setAttribute('height', String(sharpBodyHeight + glowPadY * 2));
+    glowBody.setAttribute('fill', color);
+    glowBody.setAttribute('stroke', color);
+    glowBody.setAttribute('stroke-width', '1.5');
+
+    sharpWick.setAttribute('x1', String(cx));
+    sharpWick.setAttribute('x2', String(cx));
+    sharpWick.setAttribute('y1', String(wickTop));
+    sharpWick.setAttribute('y2', String(wickBottom));
+    sharpWick.setAttribute('stroke', color);
+
+    sharpBody.setAttribute('x', String(cx - sharpBodyWidth / 2));
+    sharpBody.setAttribute('y', String(sharpBodyTop));
+    sharpBody.setAttribute('width', String(sharpBodyWidth));
+    sharpBody.setAttribute('height', String(sharpBodyHeight));
+    sharpBody.setAttribute('fill', color);
+    sharpBody.setAttribute('stroke', color);
+    sharpBody.setAttribute('stroke-width', '0');
 
     svg.style.display = 'block';
   }
