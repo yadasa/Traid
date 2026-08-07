@@ -38,6 +38,11 @@ from . import ict_consensus_runtime as _ict_consensus_runtime  # noqa: F401,E402
 # export, refresh it hourly, and map each event to affected Traid symbols.
 from . import calendar_runtime as _calendar_runtime  # noqa: F401,E402
 
+# Expose one-shot historical Kronos inference at a fixed completed-candle cutoff.
+# The realized future is returned separately for cheap client-side replay and is
+# never included in the model input.
+from . import replay_runtime as _replay_runtime  # noqa: F401,E402
+
 # Poll and publish the latest MT5 quote independently from model inference,
 # scoring, candle-boundary checks, and multi-timeframe analysis. The live candle
 # close is forced to the exact quote price in the same WebSocket payload.
