@@ -18,6 +18,9 @@ from .service import app, get_engine, settings, store, trading_error
 from .service_patch import NORMAL_SAMPLE_COUNT
 
 
+ATR_PERIOD = 14
+
+
 class KronosReplayRequest(BaseModel):
     symbol: str = "XAUUSD"
     timeframe: str = "5m"
@@ -39,6 +42,42 @@ def _as_utc(value: object) -> pd.Timestamp:
     if timestamp.tzinfo is None:
         return timestamp.tz_localize("UTC")
     return timestamp.tz_convert("UTC")
+
+
+def _wilder_atr(
+    history: list[dict[str, Any]],
+    period: int = ATR_PERIOD,
+) -> float | None:
+    """Return Wilder ATR using only candles that existed at the replay cutoff."""
+
+    frame = pd.DataFrame(history).copy()
+    if len(frame) < period:
+        return None
+    for column in ("high", "low", "close"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.dropna(subset=["high", "low", "close"]).reset_index(drop=True)
+    if len(frame) < period:
+        return None
+
+    previous_close = frame["close"].shift(1)
+    true_range = pd.concat(
+        [
+            frame["high"] - frame["low"],
+            (frame["high"] - previous_close).abs(),
+            (frame["low"] - previous_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    true_range = true_range.dropna().astype(float)
+    if len(true_range) < period:
+        return None
+
+    atr = float(true_range.iloc[:period].mean())
+    for value in true_range.iloc[period:]:
+        atr = (atr * (period - 1) + float(value)) / period
+    if pd.isna(atr) or atr <= 0:
+        return None
+    return atr
 
 
 class _HistoricalSnapshotProvider:
@@ -251,6 +290,7 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
         if not history or not projection:
             raise ValueError("The live Traid forecast stack returned an empty replay projection.")
 
+        cutoff_atr14 = _wilder_atr(history, ATR_PERIOD)
         base_close = float(history[-1]["close"])
         projected_close = float(projection[-1]["close"])
         actual_close = float(actual["close"].iloc[-1]) if not actual.empty else None
@@ -272,17 +312,21 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
 
         actual_move_pct = None
         final_close_error_pct = None
+        final_close_error_atr = None
         if actual_close is not None:
             actual_move_pct = (
                 (actual_close - base_close) / max(abs(base_close), 1e-12) * 100
             )
             realized_index = min(len(actual), len(projection)) - 1
             matched_prediction_close = float(projection[realized_index]["close"])
+            absolute_close_error = abs(matched_prediction_close - actual_close)
             final_close_error_pct = (
-                abs(matched_prediction_close - actual_close)
+                absolute_close_error
                 / max(abs(actual_close), 1e-12)
                 * 100
             )
+            if cutoff_atr14 is not None and cutoff_atr14 > 0:
+                final_close_error_atr = absolute_close_error / cutoff_atr14
 
         parameters = dict(result.get("parameters") or {})
         revision = dict(result.get("revision") or {})
@@ -306,6 +350,8 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
             "inference_ms": inference_ms,
             "advanced": bool(result.get("advanced", payload.advanced)),
             "feature_mode": result.get("feature_mode") or parameters.get("feature_mode"),
+            "atr_period": ATR_PERIOD,
+            "cutoff_atr14": cutoff_atr14,
             "parameters": parameters,
             "history": history,
             "projection": projection,
@@ -343,6 +389,7 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
                 ),
                 "actual_move_pct": actual_move_pct,
                 "final_close_error_pct": final_close_error_pct,
+                "final_close_error_atr": final_close_error_atr,
             },
         }
     except (ValueError, MarketDataError) as exc:
