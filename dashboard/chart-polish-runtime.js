@@ -1,5 +1,6 @@
 (() => {
   const STORAGE_KEY = 'traid.chart.timeMode';
+  const LOCAL_TIME_ZONE = 'America/Chicago';
   const VALID_TIME_MODES = new Set(['utc', 'local']);
   let timeMode = VALID_TIME_MODES.has(localStorage.getItem(STORAGE_KEY))
     ? localStorage.getItem(STORAGE_KEY)
@@ -24,7 +25,6 @@
     const style = document.createElement('style');
     style.id = 'traidChartPolishStyles';
     style.textContent = `
-      /* Retire the old rectangular DOM halo. The SVG clone below is the glow. */
       #liveCandleGlow { display:none !important; }
 
       .traid-live-candle-clone {
@@ -39,17 +39,18 @@
       .traid-live-glow-pulse {
         animation:traidGaussianLivePulse 2.25s ease-in-out infinite;
         will-change:opacity,filter;
+        mix-blend-mode:screen;
       }
       @keyframes traidGaussianLivePulse {
-        0%,100% { opacity:.20; filter:brightness(.80); }
-        50% { opacity:.78; filter:brightness(1.65); }
+        0%,100% { opacity:.24; filter:brightness(.82); }
+        50% { opacity:.82; filter:brightness(1.72); }
       }
       .chart-time-mode-button {
-        min-width:58px;
+        min-width:72px;
         white-space:nowrap;
       }
       @media (prefers-reduced-motion:reduce) {
-        .traid-live-glow-pulse { animation:none; opacity:.42; filter:brightness(1.12); }
+        .traid-live-glow-pulse { animation:none; opacity:.48; filter:brightness(1.14); }
       }
     `;
     document.head.appendChild(style);
@@ -76,6 +77,7 @@
     svg.classList.add('traid-live-candle-clone');
     svg.setAttribute('aria-hidden', 'true');
     svg.style.display = 'none';
+    svg.style.overflow = 'visible';
 
     const defs = document.createElementNS(ns, 'defs');
     const filter = document.createElementNS(ns, 'filter');
@@ -86,7 +88,7 @@
     filter.setAttribute('height', '700%');
     filter.setAttribute('color-interpolation-filters', 'sRGB');
     const blur = document.createElementNS(ns, 'feGaussianBlur');
-    blur.setAttribute('stdDeviation', '3.8');
+    blur.setAttribute('stdDeviation', '4.4');
     filter.appendChild(blur);
     defs.appendChild(filter);
     svg.appendChild(defs);
@@ -99,12 +101,12 @@
     const wick = document.createElementNS(ns, 'line');
     wick.id = 'traidLiveCloneWick';
     wick.setAttribute('stroke-linecap', 'round');
-    wick.setAttribute('stroke-width', '2.4');
+    wick.setAttribute('stroke-width', '3');
 
     const body = document.createElementNS(ns, 'rect');
     body.id = 'traidLiveCloneBody';
-    body.setAttribute('rx', '1.2');
-    body.setAttribute('ry', '1.2');
+    body.setAttribute('rx', '2');
+    body.setAttribute('ry', '2');
 
     blurred.append(wick, body);
     pulse.appendChild(blurred);
@@ -171,14 +173,20 @@
     let barSpacing = 8;
     try {
       const candidate = Number(chart.timeScale().options?.().barSpacing);
-      if (Number.isFinite(candidate)) barSpacing = candidate;
+      if (Number.isFinite(candidate) && candidate > 0) barSpacing = candidate;
     } catch (_) {}
-    const bodyWidth = Math.max(4, Math.min(12, barSpacing * .66));
+
+    // Lightweight Charts expands candle bodies as bars are zoomed apart. The old
+    // 12px cap made a wide candle's glow look like a second wick. Track bar spacing
+    // instead so the blurred clone remains the same visual candle at every zoom.
+    const sharpBodyWidth = Math.max(4, Math.min(180, barSpacing * .78));
+    const glowPadX = Math.max(3, Math.min(10, sharpBodyWidth * .10));
+    const glowPadY = 3.5;
     const cx = offsetX + x;
     const wickTop = offsetY + Math.min(highY, lowY);
     const wickBottom = offsetY + Math.max(highY, lowY);
-    const bodyTop = offsetY + Math.min(openY, closeY);
-    const bodyHeight = Math.max(1.6, Math.abs(closeY - openY));
+    const sharpBodyTop = offsetY + Math.min(openY, closeY);
+    const sharpBodyHeight = Math.max(2, Math.abs(closeY - openY));
     const color = liveColor(row);
 
     const wick = document.getElementById('traidLiveCloneWick');
@@ -191,13 +199,13 @@
     wick.setAttribute('y2', String(wickBottom));
     wick.setAttribute('stroke', color);
 
-    body.setAttribute('x', String(cx - bodyWidth / 2));
-    body.setAttribute('y', String(bodyTop));
-    body.setAttribute('width', String(bodyWidth));
-    body.setAttribute('height', String(bodyHeight));
+    body.setAttribute('x', String(cx - sharpBodyWidth / 2 - glowPadX));
+    body.setAttribute('y', String(sharpBodyTop - glowPadY));
+    body.setAttribute('width', String(sharpBodyWidth + glowPadX * 2));
+    body.setAttribute('height', String(sharpBodyHeight + glowPadY * 2));
     body.setAttribute('fill', color);
     body.setAttribute('stroke', color);
-    body.setAttribute('stroke-width', '1');
+    body.setAttribute('stroke-width', '1.5');
 
     svg.style.display = 'block';
   }
@@ -245,8 +253,8 @@
 
   function formatDate(date, options) {
     if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
-    const withZone = timeMode === 'utc' ? { ...options, timeZone: 'UTC' } : options;
-    return new Intl.DateTimeFormat(undefined, withZone).format(date);
+    const zone = timeMode === 'local' ? LOCAL_TIME_ZONE : 'UTC';
+    return new Intl.DateTimeFormat(undefined, { ...options, timeZone: zone }).format(date);
   }
 
   function formatTick(time, tickMarkType) {
@@ -267,16 +275,17 @@
       hour: 'numeric',
       minute: '2-digit',
       second: '2-digit',
+      timeZoneName: 'short',
     });
   }
 
   function updateTimeButton() {
     const button = document.getElementById('chartTimeModeButton');
     if (!button) return;
-    button.textContent = timeMode === 'local' ? 'LOCAL' : 'UTC';
+    button.textContent = timeMode === 'local' ? 'LOCAL CT' : 'UTC';
     button.title = timeMode === 'local'
-      ? 'Chart timestamps use your computer/system time. Click for UTC.'
-      : 'Chart timestamps use UTC. Click for your computer/system time.';
+      ? 'Chart timestamps use Houston/Central time (America/Chicago). Click for UTC.'
+      : 'Chart timestamps use UTC. Click for Houston/Central time.';
     button.setAttribute('aria-label', button.title);
   }
 
@@ -307,7 +316,9 @@
       timeMode = timeMode === 'utc' ? 'local' : 'utc';
       localStorage.setItem(STORAGE_KEY, timeMode);
       applyTimeMode();
-      window.dispatchEvent(new CustomEvent('traid-chart-time-mode', { detail: { mode: timeMode } }));
+      window.dispatchEvent(new CustomEvent('traid-chart-time-mode', {
+        detail: { mode: timeMode, timeZone: timeMode === 'local' ? LOCAL_TIME_ZONE : 'UTC' },
+      }));
     });
     const refresh = document.getElementById('refreshForecast');
     toolbar.insertBefore(button, refresh || null);
@@ -370,8 +381,6 @@
     keepOnlyExplicitLivePriceLabel();
     requestAnimationFrame(positionClone);
 
-    // Series options can be reapplied by other dashboard runtimes, so keep the
-    // single-label rule cheap and self-healing without touching market data.
     setInterval(keepOnlyExplicitLivePriceLabel, 1500);
   }
 
