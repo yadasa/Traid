@@ -225,7 +225,28 @@
     document.head.appendChild(script);
   }
 
+  // Layout controls are DOM-only and deliberately load after the base dashboard
+  // is ready so they never participate in app-loader temporal-dead-zone patches.
+  function loadLayoutControlsWhenReady() {
+    if (document.querySelector('script[data-traid-layout-controls]')) return;
+    const chartNode = document.getElementById('chart');
+    const workspace = document.querySelector('.workspace');
+    const watchlist = document.getElementById('watchlistPanel');
+    const trade = document.getElementById('tradePanel');
+    if (!chartNode || !workspace || !watchlist || !trade) {
+      setTimeout(loadLayoutControlsWhenReady, 60);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.dataset.traidLayoutControls = 'true';
+    script.src = new URL('./layout-controls-runtime.js', runtimeUrl).href;
+    script.onerror = () => console.error('Could not load layout-controls-runtime.js');
+    document.head.appendChild(script);
+  }
+
   setTimeout(loadHistoricalReplayWhenReady, 0);
   setTimeout(loadReplayCutoffWhenReady, 80);
   setTimeout(loadChartPolishWhenReady, 0);
+  setTimeout(loadLayoutControlsWhenReady, 120);
 })();
