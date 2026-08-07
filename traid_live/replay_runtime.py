@@ -5,11 +5,13 @@ import time
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 
 from .forecast import ForecastParameters
-from .market import get_timeframe, normalize_symbol
+from .intelligence_v2 import _predict_paths
+from .market import INDEX_SYMBOLS, get_timeframe, normalize_symbol
 from .providers import MarketDataError
 from .service import app, frame_records, get_engine, settings, trading_error
 
@@ -42,6 +44,173 @@ def _as_utc(value: object) -> pd.Timestamp:
     if timestamp.tzinfo is None:
         return timestamp.tz_localize("UTC")
     return timestamp.tz_convert("UTC")
+
+
+def _representative_sample(
+    paths: list[pd.DataFrame],
+    *,
+    base_close: float,
+) -> tuple[int, pd.DataFrame, dict[str, float]]:
+    """Choose one real Kronos sample close to the ensemble center.
+
+    KronosPredictor.predict() averages decoded samples into a synthetic candle path.
+    That is undesirable for replay because independently averaged OHLC values can
+    exaggerate inter-candle gaps. Replay instead preserves every sampled path and
+    selects the actual sample nearest the ensemble median while mildly preferring
+    paths whose opens remain connected to the preceding close.
+    """
+
+    if not paths:
+        raise ValueError("Kronos returned no sampled replay paths.")
+
+    close_matrix = np.asarray(
+        [path["close"].to_numpy(dtype=float) for path in paths],
+        dtype=float,
+    )
+    median_close = np.median(close_matrix, axis=0)
+    scale = max(abs(float(base_close)), 1e-9)
+
+    scores: list[float] = []
+    gap_scores: list[float] = []
+    center_scores: list[float] = []
+    for path in paths:
+        closes = path["close"].to_numpy(dtype=float)
+        opens = path["open"].to_numpy(dtype=float)
+        previous = np.concatenate(([float(base_close)], closes[:-1]))
+        gaps = np.abs(opens - previous) / scale
+        center = np.sqrt(np.mean(((closes - median_close) / scale) ** 2))
+        gap = float(np.mean(gaps))
+        anchor = abs(float(opens[0]) - float(base_close)) / scale
+        # Ensemble-center distance dominates. Gap/anchor terms only break ties
+        # toward a more physically continuous real sample.
+        score = float(center + gap * 0.35 + anchor * 0.20)
+        center_scores.append(float(center))
+        gap_scores.append(gap)
+        scores.append(score)
+
+    index = int(np.argmin(np.asarray(scores, dtype=float)))
+    return (
+        index,
+        paths[index].copy().reset_index(drop=True),
+        {
+            "score": scores[index],
+            "center_distance": center_scores[index],
+            "mean_raw_gap_pct": gap_scores[index] * 100.0,
+        },
+    )
+
+
+def _stitch_projection(
+    projection: pd.DataFrame,
+    *,
+    base_close: float,
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    """Make forecast candles sequential without changing each candle's shape.
+
+    Decoded Kronos candles can contain an open that differs materially from the
+    previous decoded close. On an intraday CFD replay that produces visual gaps and
+    can make the price scale explode. Shift the complete OHLC candle by that gap so
+    every candle opens at the previous close. The candle body delta and wick
+    distances are preserved exactly; only the absolute inter-candle discontinuity
+    is removed.
+    """
+
+    clean = projection.copy().reset_index(drop=True)
+    if clean.empty:
+        return clean, {"max_shift_pct": 0.0, "mean_shift_pct": 0.0}
+
+    previous_close = float(base_close)
+    shifts: list[float] = []
+    scale = max(abs(float(base_close)), 1e-9)
+
+    for index in range(len(clean)):
+        original_open = float(clean.at[index, "open"])
+        shift = previous_close - original_open
+        shifts.append(abs(shift) / scale * 100.0)
+        for column in ("open", "high", "low", "close"):
+            clean.at[index, column] = float(clean.at[index, column]) + shift
+
+        open_price = float(clean.at[index, "open"])
+        close_price = float(clean.at[index, "close"])
+        clean.at[index, "high"] = max(
+            float(clean.at[index, "high"]),
+            open_price,
+            close_price,
+        )
+        clean.at[index, "low"] = min(
+            float(clean.at[index, "low"]),
+            open_price,
+            close_price,
+        )
+        previous_close = close_price
+
+    return clean, {
+        "max_shift_pct": max(shifts) if shifts else 0.0,
+        "mean_shift_pct": float(np.mean(shifts)) if shifts else 0.0,
+    }
+
+
+def _sample_replay_projection(
+    engine: Any,
+    *,
+    symbol: str,
+    context: pd.DataFrame,
+    future_timestamps: pd.DatetimeIndex,
+    params: ForecastParameters,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Run replay inference using the same sampled-path conventions as live mode."""
+
+    used_history = context.tail(min(params.lookback, settings.max_context)).copy().reset_index(drop=True)
+    model_input = used_history[
+        ["open", "high", "low", "close", "volume", "amount"]
+    ].copy()
+
+    feature_mode = "ohlcv"
+    if symbol in INDEX_SYMBOLS:
+        # Broker tick volume on index CFDs is not comparable to the data Kronos was
+        # trained to interpret as real volume. Live Traid already uses price-only
+        # inference for these markets; replay must do the same.
+        model_input["volume"] = 0.0
+        model_input["amount"] = 0.0
+        feature_mode = "price_only"
+
+    x_timestamp = pd.Series(
+        pd.to_datetime(used_history["timestamp"], utc=True),
+        name="timestamp",
+    )
+    y_timestamp = pd.Series(
+        pd.to_datetime(future_timestamps, utc=True),
+        name="timestamp",
+    )
+
+    paths = _predict_paths(
+        engine,
+        model_input,
+        x_timestamp,
+        y_timestamp,
+        params,
+        params.sample_count,
+    )
+    base_close = float(used_history["close"].iloc[-1])
+    sample_index, raw_sample, sample_meta = _representative_sample(
+        paths,
+        base_close=base_close,
+    )
+    projection, continuity_meta = _stitch_projection(
+        raw_sample,
+        base_close=base_close,
+    )
+
+    return used_history, projection, {
+        "feature_mode": feature_mode,
+        "sample_selection": "real_medoid_near_ensemble_median",
+        "selected_sample_index": sample_index,
+        "sample_count": len(paths),
+        "continuity_rebased": True,
+        "representative": sample_meta,
+        "continuity": continuity_meta,
+        "raw_selected_projection": frame_records(raw_sample),
+    }
 
 
 @app.post("/v1/replay/kronos")
@@ -108,9 +277,6 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
         if context.empty:
             raise ValueError("No model context is available before that replay cutoff.")
 
-        # Forecast timestamps are generated independently of realized candles.
-        # This is what makes a cutoff close to the present valid: Kronos can still
-        # forecast 24 candles even if only 23 of those candles have closed so far.
         future_timestamps = engine.provider.future_timestamps(
             symbol=canonical,
             timeframe=payload.timeframe,
@@ -118,8 +284,6 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
             periods=payload.pred_len,
         )
 
-        # Actual future is intentionally partial when the replay horizon extends
-        # beyond the newest completed broker candle. Playback simply stops there.
         actual = (
             candles.iloc[cutoff_index : cutoff_index + payload.pred_len]
             .copy()
@@ -138,11 +302,13 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
         )
 
         started = time.perf_counter()
-        used_history, prediction = await asyncio.to_thread(
-            engine.forecast_from_history,
-            params,
-            context,
-            future_timestamps,
+        used_history, prediction, replay_meta = await asyncio.to_thread(
+            _sample_replay_projection,
+            engine,
+            symbol=canonical,
+            context=context,
+            future_timestamps=future_timestamps,
+            params=params,
         )
         inference_ms = (time.perf_counter() - started) * 1000
 
@@ -172,8 +338,6 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
             actual_move_pct = (
                 (actual_close - base_close) / max(abs(base_close), 1e-12) * 100
             )
-            # When only part of the forecast horizon has happened, compare the
-            # latest realized candle with the prediction at the same horizon index.
             realized_index = min(len(actual), len(prediction)) - 1
             matched_prediction_close = float(prediction["close"].iloc[realized_index])
             final_close_error_pct = (
@@ -199,6 +363,15 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
             "available_actual_candles": len(actual),
             "actual_horizon_complete": len(actual) >= payload.pred_len,
             "inference_ms": inference_ms,
+            "feature_mode": replay_meta["feature_mode"],
+            "replay_projection": {
+                "sample_selection": replay_meta["sample_selection"],
+                "selected_sample_index": replay_meta["selected_sample_index"],
+                "sample_count": replay_meta["sample_count"],
+                "continuity_rebased": replay_meta["continuity_rebased"],
+                "representative": replay_meta["representative"],
+                "continuity": replay_meta["continuity"],
+            },
             "parameters": {
                 "lookback": len(used_history),
                 "pred_len": payload.pred_len,
@@ -206,9 +379,13 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
                 "top_k": params.top_k,
                 "top_p": params.top_p,
                 "sample_count": params.sample_count,
+                "feature_mode": replay_meta["feature_mode"],
+                "sample_selection": replay_meta["sample_selection"],
+                "continuity_rebased": True,
             },
             "history": frame_records(used_history),
             "projection": frame_records(prediction),
+            "projection_raw_selected_sample": replay_meta["raw_selected_projection"],
             "actual": frame_records(actual),
             "summary": {
                 "forecast_direction": forecast_direction,
