@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from typing import Sequence
 
 import pandas as pd
 
@@ -62,8 +63,8 @@ class ForecastEngine:
             raise ValueError("limit must be at least 2.")
         return self.provider.get_candles(canonical, timeframe, limit)
 
-    def forecast(self, params: ForecastParameters) -> tuple[pd.DataFrame, pd.DataFrame]:
-        symbol = normalize_symbol(params.symbol)
+    @staticmethod
+    def _validate_params(params: ForecastParameters) -> None:
         if params.lookback < 2:
             raise ValueError("lookback must be at least 2.")
         if params.pred_len < 1:
@@ -75,33 +76,49 @@ class ForecastEngine:
         if not 0 < params.top_p <= 1:
             raise ValueError("top_p must be in the interval (0, 1].")
 
-        lookback = min(params.lookback, self.settings.max_context)
-        candles = self.candles(symbol, params.timeframe, lookback)
-        historical = candles.tail(lookback).reset_index(drop=True)
+    def forecast_from_history(
+        self,
+        params: ForecastParameters,
+        historical: pd.DataFrame,
+        future_timestamps: Sequence[object] | pd.Series | pd.Index,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Run Kronos against an explicit historical cutoff without fetching newer bars.
 
-        x_df = historical[
-            ["open", "high", "low", "close", "volume", "amount"]
-        ].copy()
+        Replay/backtest callers pass the candle history that existed at the chosen
+        cutoff plus the timestamps that followed it. The model never receives the
+        realized future OHLCV values, which prevents look-ahead leakage while still
+        letting a historical replay use the real future candle timestamps.
+        """
+
+        normalize_symbol(params.symbol)
+        self._validate_params(params)
+        if historical is None or historical.empty:
+            raise ValueError("Historical replay context cannot be empty.")
+
+        required = {"timestamp", "open", "high", "low", "close", "volume", "amount"}
+        missing = sorted(required.difference(historical.columns))
+        if missing:
+            raise ValueError(f"Historical replay context is missing columns: {', '.join(missing)}")
+
+        lookback = min(params.lookback, self.settings.max_context, len(historical))
+        if lookback < 2:
+            raise ValueError("Historical replay requires at least two completed candles.")
+        history = historical.tail(lookback).copy().reset_index(drop=True)
+
+        future_index = pd.to_datetime(list(future_timestamps), utc=True)
+        if len(future_index) < params.pred_len:
+            raise ValueError("Not enough future timestamps are available for the requested projection.")
+        future_index = future_index[: params.pred_len]
+
+        x_df = history[["open", "high", "low", "close", "volume", "amount"]].copy()
         x_timestamp = pd.Series(
-            pd.to_datetime(historical["timestamp"], utc=True),
+            pd.to_datetime(history["timestamp"], utc=True),
             name="timestamp",
         )
-        future_timestamps = self.provider.future_timestamps(
-            symbol=symbol,
-            timeframe=params.timeframe,
-            last_timestamp=historical["timestamp"].iloc[-1],
-            periods=params.pred_len,
-        )
-        # Kronos' time-feature helper uses the pandas Series `.dt` accessor.
-        # Provider implementations commonly return a DatetimeIndex, so normalize
-        # both historical and future timestamps before inference.
-        y_timestamp = pd.Series(
-            pd.to_datetime(future_timestamps, utc=True),
-            name="timestamp",
-        )
+        y_timestamp = pd.Series(future_index, name="timestamp")
 
-        # Kronos/PyTorch inference is serialized by default. This avoids simultaneous
-        # requests exhausting GPU memory and protects model state on CPU/MPS as well.
+        # Inference remains serialized so historical replay cannot race the live
+        # forecast path for GPU memory/model state.
         with self._model_lock:
             prediction = self.predictor.predict(
                 df=x_df,
@@ -118,7 +135,22 @@ class ForecastEngine:
         prediction = enforce_market_constraints(prediction)
         prediction.index.name = "timestamp"
         prediction = prediction.reset_index()
-        return historical, prediction
+        return history, prediction
+
+    def forecast(self, params: ForecastParameters) -> tuple[pd.DataFrame, pd.DataFrame]:
+        symbol = normalize_symbol(params.symbol)
+        self._validate_params(params)
+
+        lookback = min(params.lookback, self.settings.max_context)
+        candles = self.candles(symbol, params.timeframe, lookback)
+        historical = candles.tail(lookback).reset_index(drop=True)
+        future_timestamps = self.provider.future_timestamps(
+            symbol=symbol,
+            timeframe=params.timeframe,
+            last_timestamp=historical["timestamp"].iloc[-1],
+            periods=params.pred_len,
+        )
+        return self.forecast_from_history(params, historical, future_timestamps)
 
 
 def enforce_market_constraints(frame: pd.DataFrame) -> pd.DataFrame:
