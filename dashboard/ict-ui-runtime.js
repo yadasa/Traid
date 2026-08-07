@@ -190,5 +190,24 @@
     document.head.appendChild(script);
   }
 
+  // Chart polish is intentionally isolated from app-loader.js. Waiting for the
+  // same bootstrap signal keeps its wrappers away from temporal-dead-zone races.
+  function loadChartPolishWhenReady() {
+    if (document.querySelector('script[data-traid-chart-polish]')) return;
+    const legacyReplayButton = document.getElementById('runReplay');
+    const chartNode = document.getElementById('chart');
+    if (!legacyReplayButton || typeof legacyReplayButton.onclick !== 'function' || !chartNode) {
+      setTimeout(loadChartPolishWhenReady, 60);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.dataset.traidChartPolish = 'true';
+    script.src = new URL('./chart-polish-runtime.js', runtimeUrl).href;
+    script.onerror = () => console.error('Could not load chart-polish-runtime.js');
+    document.head.appendChild(script);
+  }
+
   setTimeout(loadHistoricalReplayWhenReady, 0);
+  setTimeout(loadChartPolishWhenReady, 0);
 })();
