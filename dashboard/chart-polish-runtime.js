@@ -167,6 +167,22 @@
     return '#94a3b8';
   }
 
+  function liveGlowStyle(row) {
+    const open = Number(row?.open);
+    const close = Number(row?.close);
+    if (!Number.isFinite(open) || !Number.isFinite(close)) {
+      return { color: '#94a3b8', blendMode: 'screen' };
+    }
+    if (close < open) {
+      // Keep the sharp candle on the chart's normal bearish color, but use a
+      // deeper true red for the blurred clone. Screen blending was lifting the
+      // old pink-red toward white at the pulse peak, so bearish glow uses normal
+      // compositing while retaining the exact same Gaussian blur and pulse.
+      return { color: '#b91c1c', blendMode: 'normal' };
+    }
+    return { color: liveColor(row), blendMode: 'screen' };
+  }
+
   function positionClone() {
     if (!chartReady()) return;
     const row = currentLiveRow();
@@ -210,25 +226,29 @@
     const sharpBodyTop = offsetY + Math.min(openY, closeY);
     const sharpBodyHeight = Math.max(2, Math.abs(closeY - openY));
     const color = liveColor(row);
+    const glowStyle = liveGlowStyle(row);
 
+    const pulse = svg.querySelector('.traid-live-glow-pulse');
     const glowWick = document.getElementById('traidLiveCloneWick');
     const glowBody = document.getElementById('traidLiveCloneBody');
     const sharpWick = document.getElementById('traidLiveSharpWick');
     const sharpBody = document.getElementById('traidLiveSharpBody');
     if (!glowWick || !glowBody || !sharpWick || !sharpBody) return;
 
+    if (pulse) pulse.style.mixBlendMode = glowStyle.blendMode;
+
     glowWick.setAttribute('x1', String(cx));
     glowWick.setAttribute('x2', String(cx));
     glowWick.setAttribute('y1', String(wickTop));
     glowWick.setAttribute('y2', String(wickBottom));
-    glowWick.setAttribute('stroke', color);
+    glowWick.setAttribute('stroke', glowStyle.color);
 
     glowBody.setAttribute('x', String(cx - sharpBodyWidth / 2 - glowPadX));
     glowBody.setAttribute('y', String(sharpBodyTop - glowPadY));
     glowBody.setAttribute('width', String(sharpBodyWidth + glowPadX * 2));
     glowBody.setAttribute('height', String(sharpBodyHeight + glowPadY * 2));
-    glowBody.setAttribute('fill', color);
-    glowBody.setAttribute('stroke', color);
+    glowBody.setAttribute('fill', glowStyle.color);
+    glowBody.setAttribute('stroke', glowStyle.color);
     glowBody.setAttribute('stroke-width', '1.5');
 
     sharpWick.setAttribute('x1', String(cx));
