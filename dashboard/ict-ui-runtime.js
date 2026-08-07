@@ -190,6 +190,23 @@
     document.head.appendChild(script);
   }
 
+  // Exact-time replay controls are a second stage because they replace the
+  // legacy candles-ago Generate listener only after historical replay owns the UI.
+  function loadReplayCutoffWhenReady() {
+    if (document.querySelector('script[data-traid-replay-cutoff]')) return;
+    const generate = document.getElementById('historicalReplayGenerate');
+    if (!generate || typeof window.LightweightCharts === 'undefined') {
+      setTimeout(loadReplayCutoffWhenReady, 70);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.dataset.traidReplayCutoff = 'true';
+    script.src = new URL('./replay-cutoff-runtime.js', runtimeUrl).href;
+    script.onerror = () => console.error('Could not load replay-cutoff-runtime.js');
+    document.head.appendChild(script);
+  }
+
   // Chart polish is intentionally isolated from app-loader.js. Waiting for the
   // same bootstrap signal keeps its wrappers away from temporal-dead-zone races.
   function loadChartPolishWhenReady() {
@@ -209,5 +226,6 @@
   }
 
   setTimeout(loadHistoricalReplayWhenReady, 0);
+  setTimeout(loadReplayCutoffWhenReady, 80);
   setTimeout(loadChartPolishWhenReady, 0);
 })();
