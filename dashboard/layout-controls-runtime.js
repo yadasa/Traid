@@ -16,6 +16,7 @@
   let pseudoFullscreen = false;
   let resizeObserver = null;
   let initialized = false;
+  let internalResizeSignalDepth = 0;
 
   function clampRatio(value) {
     return Math.max(0.38, Math.min(0.82, Number.isFinite(value) ? value : DEFAULT_CHART_RATIO));
@@ -154,7 +155,11 @@
   }
 
   function scheduleChartResize() {
-    const signal = () => window.dispatchEvent(new Event('resize'));
+    const signal = () => {
+      internalResizeSignalDepth += 1;
+      try { window.dispatchEvent(new Event('resize')); }
+      finally { internalResizeSignalDepth -= 1; }
+    };
     requestAnimationFrame(() => {
       signal();
       requestAnimationFrame(signal);
@@ -169,7 +174,10 @@
   function applyChartRatio({ persist = false } = {}) {
     const { workspace } = nodes();
     if (!workspace || !DESKTOP_MEDIA.matches || document.fullscreenElement || pseudoFullscreen) {
-      if (workspace && !DESKTOP_MEDIA.matches) workspace.style.removeProperty('grid-template-rows');
+      if (workspace && !DESKTOP_MEDIA.matches) {
+        workspace.style.removeProperty('grid-template-rows');
+        workspace.style.removeProperty('gap');
+      }
       return;
     }
     const total = availableWorkspaceHeight(workspace);
@@ -374,6 +382,7 @@
       applyChartRatio();
     });
     window.addEventListener('resize', () => {
+      if (internalResizeSignalDepth > 0) return;
       if (!document.fullscreenElement && !pseudoFullscreen) applyChartRatio();
     }, { passive: true });
 
