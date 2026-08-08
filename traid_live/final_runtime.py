@@ -49,9 +49,14 @@ from . import accuracy_runtime_patch as _accuracy_runtime_patch  # noqa: F401,E4
 
 # Upgrade the learned selector to automatic Ridge -> gradient-boosted trees once
 # enough independent Replay samples exist and the GBT wins on a chronological
-# validation slice. Add DXY, VIX, 10Y and 2Y yield references, parallelize context
-# retrieval, and avoid reloading thousands of training rows on every prediction.
+# validation slice. Add DXY, VIX, 10Y and 2Y yield references and parallelize the
+# context calculations without changing Kronos generation itself.
 from . import accuracy_v2_runtime as _accuracy_v2_runtime  # noqa: F401,E402
+
+# Pre-warm macro references during backend startup and reuse fresh cached frames
+# in live predictions so the extra context does not sit on the user's inference
+# critical path. Historical Replay still fetches its exact historical window.
+from . import accuracy_v2_speed_patch as _accuracy_v2_speed_patch  # noqa: F401,E402
 
 # Populate the existing economic-event store from the public Forex Factory weekly
 # export, refresh it hourly, and map each event to affected Traid symbols.
