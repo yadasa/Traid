@@ -39,6 +39,10 @@ from . import ict_consensus_runtime as _ict_consensus_runtime  # noqa: F401,E402
 # outcomes. This patches the ICT ranking hook without replacing Kronos output.
 from . import accuracy_runtime as _accuracy_runtime  # noqa: F401,E402
 
+# Reject same-candle forecasts created before the accuracy runtime so deployment
+# starts using cross-market/learned ranking immediately instead of after one bar.
+from . import accuracy_runtime_patch as _accuracy_runtime_patch  # noqa: F401,E402
+
 # Populate the existing economic-event store from the public Forex Factory weekly
 # export, refresh it hourly, and map each event to affected Traid symbols.
 from . import calendar_runtime as _calendar_runtime  # noqa: F401,E402
