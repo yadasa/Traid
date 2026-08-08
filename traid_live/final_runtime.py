@@ -3,6 +3,10 @@ from __future__ import annotations
 # Import the alignment runtime first so the shared FastAPI application is built.
 from .service_runtime import app
 
+# Normalize sends-after-disconnect into WebSocketDisconnect so a closed browser
+# socket cannot trigger a second send and noisy ASGI RuntimeError traceback.
+from . import websocket_safety_runtime as _websocket_safety_runtime  # noqa: F401,E402
+
 # Install MT5 serialization, forecast deduplication, and one shared WebSocket
 # publisher per market/timeframe instead of one poller per browser tab.
 from . import multitab_runtime as _multitab_runtime  # noqa: F401,E402
@@ -39,9 +43,15 @@ from . import ict_consensus_runtime as _ict_consensus_runtime  # noqa: F401,E402
 # outcomes. This patches the ICT ranking hook without replacing Kronos output.
 from . import accuracy_runtime as _accuracy_runtime  # noqa: F401,E402
 
-# Reject same-candle forecasts created before the accuracy runtime so deployment
-# starts using cross-market/learned ranking immediately instead of after one bar.
+# Reject same-candle forecasts created before the accuracy runtime and prevent
+# historical Replay from training on outcomes not yet known at its cutoff.
 from . import accuracy_runtime_patch as _accuracy_runtime_patch  # noqa: F401,E402
+
+# Upgrade the learned selector to automatic Ridge -> gradient-boosted trees once
+# enough independent Replay samples exist and the GBT wins on a chronological
+# validation slice. Add DXY, VIX, 10Y and 2Y yield references, parallelize context
+# retrieval, and avoid reloading thousands of training rows on every prediction.
+from . import accuracy_v2_runtime as _accuracy_v2_runtime  # noqa: F401,E402
 
 # Populate the existing economic-event store from the public Forex Factory weekly
 # export, refresh it hourly, and map each event to affected Traid symbols.
