@@ -5,10 +5,12 @@ from typing import Any
 from . import accuracy_runtime as accuracy
 from . import intelligence_v2 as v2
 from .accuracy_runtime import RUNTIME_VERSION
+from .market import normalize_symbol
 
 
 _BASE_MATCHING_CACHE = v2._matching_cache
 _BASE_RECORD_REPLAY_OUTCOME = accuracy.record_replay_outcome
+_BASE_TRAINING_ROWS = accuracy._training_rows
 
 
 def matching_cache_with_accuracy_version(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
@@ -31,6 +33,44 @@ def matching_cache_with_accuracy_version(*args: Any, **kwargs: Any) -> dict[str,
     if "learning_samples" not in selected:
         return None
     return cached
+
+
+def training_rows_without_future_leakage(
+    target: Any,
+    symbol: str,
+    timeframe: str,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Replay may learn only from examples whose cutoffs existed by that moment."""
+
+    replay_cutoff = getattr(target, "replay_cutoff", None)
+    if replay_cutoff is None:
+        return _BASE_TRAINING_ROWS(target, symbol, timeframe)
+
+    accuracy._ensure_schema(target)
+    canonical = normalize_symbol(symbol)
+    cutoff_iso = replay_cutoff.isoformat()
+    with target.connection() as connection:
+        stats = connection.execute(
+            """
+            SELECT COUNT(*) AS samples,
+                   COUNT(DISTINCT cutoff_timestamp) AS replays,
+                   COALESCE(MAX(id),0) AS max_id
+            FROM path_learning_samples
+            WHERE symbol=? AND timeframe=? AND cutoff_timestamp<=?
+            """,
+            (canonical, timeframe, cutoff_iso),
+        ).fetchone()
+        rows = connection.execute(
+            """
+            SELECT feature_json,target_score,cutoff_timestamp
+            FROM path_learning_samples
+            WHERE symbol=? AND timeframe=? AND cutoff_timestamp<=?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (canonical, timeframe, cutoff_iso, accuracy.MAX_TRAINING_ROWS),
+        ).fetchall()
+    return [dict(row) for row in rows], int(stats["replays"] or 0), int(stats["max_id"] or 0)
 
 
 def record_complete_replay_outcome(
@@ -69,4 +109,5 @@ def record_complete_replay_outcome(
 
 
 v2._matching_cache = matching_cache_with_accuracy_version
+accuracy._training_rows = training_rows_without_future_leakage
 accuracy.record_replay_outcome = record_complete_replay_outcome
