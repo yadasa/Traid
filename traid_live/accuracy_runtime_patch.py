@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
+
 from . import accuracy_runtime as accuracy
 from . import intelligence_v2 as v2
 from .accuracy_runtime import RUNTIME_VERSION
@@ -11,6 +13,23 @@ from .market import normalize_symbol
 _BASE_MATCHING_CACHE = v2._matching_cache
 _BASE_RECORD_REPLAY_OUTCOME = accuracy.record_replay_outcome
 _BASE_TRAINING_ROWS = accuracy._training_rows
+
+
+def _ensure_outcome_end_column(target: Any) -> None:
+    accuracy._ensure_schema(target)
+    with target._lock, target.connection() as connection:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(path_learning_samples)").fetchall()
+        }
+        if "outcome_end_timestamp" not in columns:
+            connection.execute(
+                "ALTER TABLE path_learning_samples ADD COLUMN outcome_end_timestamp TEXT"
+            )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_path_learning_outcome_end "
+            "ON path_learning_samples(symbol,timeframe,outcome_end_timestamp,id DESC)"
+        )
 
 
 def matching_cache_with_accuracy_version(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
@@ -40,13 +59,13 @@ def training_rows_without_future_leakage(
     symbol: str,
     timeframe: str,
 ) -> tuple[list[dict[str, Any]], int, int]:
-    """Replay may learn only from examples whose cutoffs existed by that moment."""
+    """Replay learns only from examples fully resolved by the simulated present."""
 
     replay_cutoff = getattr(target, "replay_cutoff", None)
     if replay_cutoff is None:
         return _BASE_TRAINING_ROWS(target, symbol, timeframe)
 
-    accuracy._ensure_schema(target)
+    _ensure_outcome_end_column(target)
     canonical = normalize_symbol(symbol)
     cutoff_iso = replay_cutoff.isoformat()
     with target.connection() as connection:
@@ -56,7 +75,9 @@ def training_rows_without_future_leakage(
                    COUNT(DISTINCT cutoff_timestamp) AS replays,
                    COALESCE(MAX(id),0) AS max_id
             FROM path_learning_samples
-            WHERE symbol=? AND timeframe=? AND cutoff_timestamp<=?
+            WHERE symbol=? AND timeframe=?
+              AND outcome_end_timestamp IS NOT NULL
+              AND outcome_end_timestamp<=?
             """,
             (canonical, timeframe, cutoff_iso),
         ).fetchone()
@@ -64,7 +85,9 @@ def training_rows_without_future_leakage(
             """
             SELECT feature_json,target_score,cutoff_timestamp
             FROM path_learning_samples
-            WHERE symbol=? AND timeframe=? AND cutoff_timestamp<=?
+            WHERE symbol=? AND timeframe=?
+              AND outcome_end_timestamp IS NOT NULL
+              AND outcome_end_timestamp<=?
             ORDER BY id DESC
             LIMIT ?
             """,
@@ -99,15 +122,38 @@ def record_complete_replay_outcome(
             "detail": "Path learning waits until the complete replay forecast horizon is realized.",
             "runtime_version": RUNTIME_VERSION,
         }
-    return _BASE_RECORD_REPLAY_OUTCOME(
+
+    result = _BASE_RECORD_REPLAY_OUTCOME(
         target,
         capture,
         actual,
         cutoff_timestamp=cutoff_timestamp,
         atr=atr,
     )
+    if int(result.get("recorded") or 0) <= 0:
+        return result
+
+    _ensure_outcome_end_column(target)
+    canonical = normalize_symbol(str((capture or {}).get("symbol")))
+    timeframe = str((capture or {}).get("timeframe"))
+    try:
+        outcome_end = pd.to_datetime(actual["timestamp"].iloc[-1], utc=True).isoformat()
+    except Exception:
+        outcome_end = None
+    if outcome_end:
+        with target._lock, target.connection() as connection:
+            connection.execute(
+                """
+                UPDATE path_learning_samples
+                SET outcome_end_timestamp=?
+                WHERE symbol=? AND timeframe=? AND cutoff_timestamp=?
+                """,
+                (outcome_end, canonical, timeframe, cutoff_timestamp),
+            )
+    return {**result, "outcome_end_timestamp": outcome_end}
 
 
+_ensure_outcome_end_column(accuracy.store)
 v2._matching_cache = matching_cache_with_accuracy_version
 accuracy._training_rows = training_rows_without_future_leakage
 accuracy.record_replay_outcome = record_complete_replay_outcome
