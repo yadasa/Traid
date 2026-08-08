@@ -1,8 +1,20 @@
 (() => {
   let installed = false;
 
+  function loadPolishRuntime() {
+    if (document.getElementById('traidRuntimePolishV2Script')) return;
+    const script = document.createElement('script');
+    script.id = 'traidRuntimePolishV2Script';
+    script.src = './runtime-polish-v2.js';
+    script.async = false;
+    document.body.appendChild(script);
+  }
+
   function install() {
-    if (installed) return;
+    if (installed) {
+      loadPolishRuntime();
+      return;
+    }
     if (typeof api !== 'function') {
       setTimeout(install, 80);
       return;
@@ -36,6 +48,7 @@
         body: JSON.stringify(payload),
       });
     };
+    loadPolishRuntime();
   }
 
   setTimeout(install, 0);
