@@ -355,3 +355,5 @@
 
   window.addEventListener('pagehide', () => cancelAnimationFrame(frame), { once: true });
 })();
+
+import('./homepage-waitlist.js').catch(error => console.error('Traid waitlist failed to load:', error));
