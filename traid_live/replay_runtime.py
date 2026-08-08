@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 
+from .accuracy_runtime import capture_replay_candidates, record_replay_outcome
 from .forecast import ForecastEngine, ForecastParameters
 from .market import get_timeframe, normalize_symbol
 from .platform import ForecastPlatform, PlatformStore
@@ -87,7 +88,8 @@ class _HistoricalSnapshotProvider:
     the normal provider contract. This wrapper changes only data availability: a
     candle is visible when it had fully closed by the replay cutoff, and no forming
     candle is exposed because ordinary historical OHLC does not contain point-in-time
-    intrabar states.
+    intrabar states. Cross-market context also uses this wrapper, so related-market
+    candles are frozen at the same simulated present with no future leakage.
     """
 
     def __init__(self, provider: Any, cutoff: pd.Timestamp) -> None:
@@ -181,8 +183,8 @@ def _generate_with_live_stack(
     pred_len: int,
     advanced: bool,
     paths: int | None,
-) -> dict[str, Any]:
-    """Call the exact ForecastPlatform.generate() currently used by the live chart."""
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Call the exact ForecastPlatform.generate() used by live and capture candidates."""
 
     with tempfile.TemporaryDirectory(prefix="traid-replay-") as directory:
         replay_store = _ReplayStore(
@@ -213,11 +215,13 @@ def _generate_with_live_stack(
             sample_count=NORMAL_SAMPLE_COUNT,
         )
 
-        return replay_platform.generate(
-            params,
-            advanced=advanced,
-            paths=paths if advanced else None,
-        )
+        with capture_replay_candidates(canonical, timeframe) as capture:
+            result = replay_platform.generate(
+                params,
+                advanced=advanced,
+                paths=paths if advanced else None,
+            )
+        return result, capture
 
 
 @app.post("/v1/replay/kronos")
@@ -273,7 +277,7 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
         )
 
         started = time.perf_counter()
-        result = await asyncio.to_thread(
+        result, learning_capture = await asyncio.to_thread(
             _generate_with_live_stack,
             engine=engine,
             canonical=canonical,
@@ -294,6 +298,22 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
         base_close = float(history[-1]["close"])
         projected_close = float(projection[-1]["close"])
         actual_close = float(actual["close"].iloc[-1]) if not actual.empty else None
+
+        try:
+            path_learning = await asyncio.to_thread(
+                record_replay_outcome,
+                store,
+                learning_capture,
+                actual,
+                cutoff_timestamp=simulated_present.isoformat(),
+                atr=cutoff_atr14,
+            )
+        except Exception as exc:
+            path_learning = {
+                "recorded": 0,
+                "learned": False,
+                "detail": f"Path learning persistence failed: {exc}",
+            }
 
         def direction(value: float | None) -> str | None:
             if value is None:
@@ -331,6 +351,10 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
         parameters = dict(result.get("parameters") or {})
         revision = dict(result.get("revision") or {})
         ensemble = revision.get("path_ensemble") or {}
+        market_context = revision.get("market_context") or {}
+        cross_market = market_context.get("cross_market") or (
+            (revision.get("ict_context") or {}).get("cross_market")
+        )
 
         return {
             "mode": "live_stack_single_cutoff",
@@ -365,6 +389,8 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
             "confidence": result.get("confidence"),
             "ict_context": result.get("ict_context") or revision.get("ict_context"),
             "context_model": result.get("context_model") or revision.get("context_model"),
+            "cross_market": cross_market,
+            "path_learning": path_learning,
             "regime_gate": result.get("regime_gate") or revision.get("regime_gate"),
             "replay_projection": {
                 "aggregation": ensemble.get("aggregation"),
@@ -372,6 +398,7 @@ async def kronos_historical_replay(payload: KronosReplayRequest) -> dict[str, An
                 "projection_is_real_sample": ensemble.get("projection_is_real_sample"),
                 "ict_ranked": ensemble.get("ict_ranked"),
                 "paths": ensemble.get("paths") or parameters.get("sample_count"),
+                "selected_path": ensemble.get("selected_path"),
                 "same_live_stack": True,
             },
             "summary": {
