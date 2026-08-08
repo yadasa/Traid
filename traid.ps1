@@ -10,6 +10,7 @@ $Python = Join-Path $RepoRoot '.venv\Scripts\python.exe'
 $RuntimeFile = Join-Path $RepoRoot '.traid-runtime.json'
 $BackendUrl = 'http://127.0.0.1:8000/health'
 $DashboardUrl = 'http://127.0.0.1:3000/'
+$ChartUrl = 'http://127.0.0.1:3000/chart'
 
 function Test-ListeningPort {
     param([int]$Port)
@@ -76,12 +77,14 @@ function Show-TraidStatus {
     $dashboardListening = Test-ListeningPort 3000
     $backendHealthy = Test-HttpEndpoint $BackendUrl
     $dashboardHealthy = Test-HttpEndpoint $DashboardUrl
+    $chartHealthy = Test-HttpEndpoint $ChartUrl
 
     [pscustomobject]@{
         BackendPort = if ($backendListening) { 'Listening' } else { 'Stopped' }
         BackendHealth = if ($backendHealthy) { 'Healthy' } else { 'Unavailable' }
         DashboardPort = if ($dashboardListening) { 'Listening' } else { 'Stopped' }
         DashboardHealth = if ($dashboardHealthy) { 'Healthy' } else { 'Unavailable' }
+        ChartRoute = if ($chartHealthy) { 'Healthy' } else { 'Unavailable' }
     } | Format-Table -AutoSize
 }
 
@@ -111,7 +114,7 @@ function Start-Traid {
     else {
         $dashboardProcess = Start-Process `
             -FilePath $Python `
-            -ArgumentList @('-m', 'http.server', '3000', '-d', 'dashboard') `
+            -ArgumentList @('-m', 'traid_live.dashboard_server', '--host', '127.0.0.1', '--port', '3000', '--directory', 'dashboard') `
             -WorkingDirectory $RepoRoot `
             -PassThru
         Write-Host "Started dashboard (PID $($dashboardProcess.Id))." -ForegroundColor Green
@@ -125,7 +128,7 @@ function Start-Traid {
 
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-Date) -lt $deadline) {
-        if ((Test-HttpEndpoint $BackendUrl) -and (Test-HttpEndpoint $DashboardUrl)) {
+        if ((Test-HttpEndpoint $BackendUrl) -and (Test-HttpEndpoint $DashboardUrl) -and (Test-HttpEndpoint $ChartUrl)) {
             break
         }
         Start-Sleep -Milliseconds 500
