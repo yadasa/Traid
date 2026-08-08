@@ -34,13 +34,18 @@ from . import ict_runtime_patch as _ict_runtime_patch  # noqa: F401,E402
 # fresh Advanced forecast already exists for the same candle.
 from . import ict_consensus_runtime as _ict_consensus_runtime  # noqa: F401,E402
 
+# Add completed-candle cross-market context and an online path-quality model that
+# learns which genuine Kronos candidates perform best from historical Replay
+# outcomes. This patches the ICT ranking hook without replacing Kronos output.
+from . import accuracy_runtime as _accuracy_runtime  # noqa: F401,E402
+
 # Populate the existing economic-event store from the public Forex Factory weekly
 # export, refresh it hourly, and map each event to affected Traid symbols.
 from . import calendar_runtime as _calendar_runtime  # noqa: F401,E402
 
 # Expose one-shot historical Kronos inference at a fixed completed-candle cutoff.
 # The realized future is returned separately for cheap client-side replay and is
-# never included in the model input.
+# never included in the model input. Replay outcomes also train the path selector.
 from . import replay_runtime as _replay_runtime  # noqa: F401,E402
 
 # Poll and publish the latest MT5 quote independently from model inference,
