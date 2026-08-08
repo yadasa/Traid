@@ -7,7 +7,7 @@ import pandas as pd
 from . import accuracy_runtime as accuracy
 from . import intelligence_v2 as v2
 from .accuracy_runtime import RUNTIME_VERSION
-from .market import normalize_symbol
+from .market import get_timeframe, normalize_symbol
 
 
 _BASE_MATCHING_CACHE = v2._matching_cache
@@ -137,7 +137,10 @@ def record_complete_replay_outcome(
     canonical = normalize_symbol(str((capture or {}).get("symbol")))
     timeframe = str((capture or {}).get("timeframe"))
     try:
-        outcome_end = pd.to_datetime(actual["timestamp"].iloc[-1], utc=True).isoformat()
+        final_open = pd.to_datetime(actual["timestamp"].iloc[-1], utc=True)
+        outcome_end = (
+            final_open + pd.to_timedelta(get_timeframe(timeframe).seconds, unit="s")
+        ).isoformat()
     except Exception:
         outcome_end = None
     if outcome_end:
