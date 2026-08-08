@@ -8,7 +8,7 @@
   const MIN_CHART_HEIGHT = 350;
   const MIN_LOWER_HEIGHT = 150;
   const SPLITTER_HEIGHT = 10;
-  const DESKTOP_MEDIA = window.matchMedia('(min-width: 1001px)');
+  const DESKTOP_MEDIA = window.matchMedia('(min-width: 1001px) and (pointer: fine)');
 
   let chartRatio = clampRatio(Number(localStorage.getItem(STORAGE.chartRatio)) || DEFAULT_CHART_RATIO);
   let marketsCollapsed = localStorage.getItem(STORAGE.marketsCollapsed) === 'true';
@@ -102,7 +102,7 @@
       #chartView:fullscreen .chart-wrap,
       #chartView.traid-pseudo-fullscreen .chart-wrap { min-height:0 !important; }
 
-      @media (min-width:1001px) {
+      @media (min-width:1001px) and (pointer:fine) {
         .app-shell.traid-markets-collapsed:not(.traid-execution-collapsed) {
           grid-template-columns:44px minmax(0,1fr) 338px !important;
         }
@@ -134,7 +134,7 @@
           overflow:hidden !important;
         }
       }
-      @media (max-width:1000px) {
+      @media (max-width:1000px), (pointer:coarse) {
         .traid-side-collapse,
         .traid-chart-splitter { display:none !important; }
       }
@@ -346,7 +346,6 @@
         await chartView.requestFullscreen({ navigationUI: 'hide' });
         return;
       } catch (_) {
-        // Browser denied native fullscreen; fall through to the chart-only CSS mode.
       }
     }
     pseudoFullscreen = true;
