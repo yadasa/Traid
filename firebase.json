@@ -11,6 +11,14 @@
     "trailingSlash": false,
     "rewrites": [
       {
+        "source": "/chart",
+        "destination": "/chart.html"
+      },
+      {
+        "source": "/chart/**",
+        "destination": "/chart.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
