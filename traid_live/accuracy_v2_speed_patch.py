@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -8,15 +9,37 @@ import pandas as pd
 from . import accuracy_v2_runtime as runtime
 
 _ORIGINAL_MACRO_FRAME = runtime._macro_frame
+_PENDING_LOCK = threading.RLock()
+_PENDING: set[tuple[str, str]] = set()
+
+
+def _background_refresh(name: str, timeframe: str, cutoff: pd.Timestamp) -> None:
+    key = (name, timeframe)
+    try:
+        _ORIGINAL_MACRO_FRAME(name, timeframe, cutoff)
+    except Exception:
+        pass
+    finally:
+        with _PENDING_LOCK:
+            _PENDING.discard(key)
+
+
+def _schedule_refresh(name: str, timeframe: str, cutoff: pd.Timestamp) -> None:
+    key = (name, timeframe)
+    with _PENDING_LOCK:
+        if key in _PENDING:
+            return
+        _PENDING.add(key)
+    runtime._EXECUTOR.submit(_background_refresh, name, timeframe, cutoff)
 
 
 def cached_macro_frame(name: str, timeframe: str, cutoff: pd.Timestamp) -> pd.DataFrame:
-    """Avoid live HTTP waits by reusing the freshest pre-warmed macro frame.
+    """Keep external HTTP off the live inference critical path.
 
     Historical Replay still requests the exact historical interval so no future
-    data can leak into a simulated cutoff. Live 15m/30m/4h contexts may safely
-    reuse a fresh 5m/60m reference series because correlation alignment happens
-    by timestamp rather than by positional candle index.
+    data can leak into a simulated cutoff. Live predictions reuse the freshest
+    pre-warmed macro frame; if a feed is temporarily missing, refresh it in the
+    background and continue the forecast without waiting on network I/O.
     """
 
     ticker = runtime.MACRO_TICKERS[name][0]
@@ -37,11 +60,11 @@ def cached_macro_frame(name: str, timeframe: str, cutoff: pd.Timestamp) -> pd.Da
                 candidates.append(cached)
         if candidates:
             freshest = max(candidates, key=lambda item: item[0])
+            _schedule_refresh(name, timeframe, cutoff)
             return freshest[1].copy()
 
-    # Startup prewarming normally makes this path unnecessary, but preserve a
-    # correct blocking fallback rather than silently dropping a reference.
-    return _ORIGINAL_MACRO_FRAME(name, timeframe, cutoff)
+    _schedule_refresh(name, timeframe, cutoff)
+    return pd.DataFrame()
 
 
 def prewarm_live_references() -> None:
@@ -61,6 +84,6 @@ runtime._macro_frame = cached_macro_frame
 runtime._prewarm_macro_cache = prewarm_live_references
 
 # Pay the external-feed setup cost once during backend startup, not while the
-# trader is waiting on Kronos. Failures are best-effort and never block startup
-# permanently because every Yahoo request has a short timeout.
+# trader is waiting on Kronos. Missing feeds never delay a live forecast later;
+# they refresh asynchronously and join the next prediction when available.
 prewarm_live_references()
