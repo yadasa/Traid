@@ -15,6 +15,11 @@ service cloud.firestore {
         && value.matches('^[0-9]{6}[A-Z0-9]{14}$');
     }
 
+    function validWaitlistPhone(value) {
+      return value is string
+        && value.matches('^\\+[1-9][0-9]{7,14}$');
+    }
+
     match /users/{userId} {
       allow get: if owns(userId);
       allow list: if false;
@@ -61,6 +66,55 @@ service cloud.firestore {
         ]);
 
       allow delete: if false;
+    }
+
+    match /waitlist/{userId} {
+      allow get: if owns(userId);
+      allow list: if false;
+
+      allow create: if owns(userId)
+        && request.resource.data.keys().hasOnly([
+          'auth_uid',
+          'phone_number',
+          'first_name',
+          'last_name',
+          'email',
+          'social_handle',
+          'primary_market',
+          'experience',
+          'plan_interest',
+          'sms_opt_in',
+          'email_opt_in',
+          'status',
+          'source',
+          'utm_source',
+          'utm_medium',
+          'utm_campaign',
+          'utm_content',
+          'referrer',
+          'created_at',
+          'updated_at'
+        ])
+        && request.resource.data.auth_uid == request.auth.uid
+        && validWaitlistPhone(request.resource.data.phone_number)
+        && request.resource.data.first_name is string
+        && request.resource.data.first_name.size() > 0
+        && request.resource.data.first_name.size() <= 80
+        && request.resource.data.email is string
+        && request.resource.data.email.size() > 3
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.primary_market in ['XAUUSD', 'XAGUSD', 'EURUSD', 'USDJPY', 'NAS100', 'SPX500', 'other']
+        && request.resource.data.experience in ['new', 'under-1-year', '1-3-years', '3-plus-years']
+        && request.resource.data.plan_interest in ['weekly', 'monthly', 'either']
+        && request.resource.data.sms_opt_in is bool
+        && request.resource.data.email_opt_in is bool
+        && (request.resource.data.sms_opt_in || request.resource.data.email_opt_in)
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.source == 'homepage'
+        && request.resource.data.created_at == request.time
+        && request.resource.data.updated_at == request.time;
+
+      allow update, delete: if false;
     }
 
     match /{document=**} {
