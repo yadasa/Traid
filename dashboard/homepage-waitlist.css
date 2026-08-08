@@ -1,0 +1,174 @@
+body.waitlist-open { overflow: hidden; }
+
+.home-nav button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #aeb9c8;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color .16s ease;
+}
+.home-nav button:hover { color: white; }
+.home-nav .home-header-cta { cursor: pointer; }
+.home-button[data-open-waitlist] { cursor: pointer; }
+.home-button[data-waitlist-joined="true"],
+.home-header-cta[data-waitlist-joined="true"] { border-color: rgba(53,209,188,.3); }
+
+.home-waitlist {
+  padding: 110px 0 116px;
+  border-top: 1px solid var(--home-line);
+  background: #080c12;
+}
+.home-waitlist-grid {
+  display: grid;
+  grid-template-columns: 1.05fr .95fr;
+  gap: 90px;
+  align-items: start;
+}
+.home-waitlist-actions { margin-top: 30px; display: flex; gap: 10px; flex-wrap: wrap; }
+.home-waitlist-steps { border-top: 1px solid var(--home-line-strong); }
+.home-waitlist-step {
+  min-height: 84px;
+  padding: 20px 0;
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  gap: 18px;
+  align-items: start;
+  border-bottom: 1px solid var(--home-line);
+}
+.home-waitlist-step > span {
+  color: var(--home-faint);
+  font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.home-waitlist-step strong { display: block; color: #dce5f2; font-size: 14px; font-weight: 630; }
+.home-waitlist-step p { margin: 6px 0 0; color: var(--home-muted); font-size: 13px; line-height: 1.55; }
+
+.waitlist-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: none;
+  place-items: center;
+  padding: 18px;
+}
+.waitlist-layer.open { display: grid; }
+.waitlist-backdrop { position: absolute; inset: 0; background: rgba(2,5,10,.78); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); }
+.waitlist-dialog {
+  position: relative;
+  width: min(560px, calc(100vw - 28px));
+  max-height: min(780px, calc(100dvh - 28px));
+  overflow: auto;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 17px;
+  background: #0b1018;
+  box-shadow: 0 28px 90px rgba(0,0,0,.48);
+}
+.waitlist-dialog-header {
+  min-height: 64px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  border-bottom: 1px solid var(--home-line);
+}
+.waitlist-dialog-title { display: grid; gap: 4px; }
+.waitlist-dialog-title strong { font-size: 13px; letter-spacing: .03em; }
+.waitlist-dialog-title span { color: var(--home-faint); font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.waitlist-close {
+  margin-left: auto;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--home-line);
+  border-radius: 9px;
+  background: transparent;
+  color: #c7d1df;
+  cursor: pointer;
+  font-size: 20px;
+}
+.waitlist-progress { display: grid; grid-template-columns: repeat(3,1fr); border-bottom: 1px solid var(--home-line); }
+.waitlist-progress span {
+  padding: 11px 18px;
+  color: #4f5b6d;
+  border-right: 1px solid var(--home-line);
+  font: 650 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .08em;
+}
+.waitlist-progress span:last-child { border-right: 0; }
+.waitlist-progress span.active { color: var(--home-blue); background: rgba(138,180,255,.035); }
+.waitlist-body { padding: 26px; }
+.waitlist-step-panel { display: none; }
+.waitlist-step-panel.active { display: block; }
+.waitlist-step-panel .home-kicker { margin-bottom: 12px; }
+.waitlist-step-panel h2 { margin: 0; font-size: clamp(28px, 5vw, 40px); line-height: 1; letter-spacing: -.045em; }
+.waitlist-step-panel > p { margin: 14px 0 0; color: var(--home-muted); font-size: 14px; line-height: 1.65; }
+.waitlist-field { display: grid; gap: 7px; margin-top: 18px; }
+.waitlist-field > span { color: #aab6c5; font-size: 12px; font-weight: 620; }
+.waitlist-field input,
+.waitlist-field select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 13px;
+  border: 1px solid var(--home-line-strong);
+  border-radius: 10px;
+  outline: none;
+  background: #080c12;
+  color: var(--home-text);
+  font-size: 16px;
+}
+.waitlist-field input:focus,
+.waitlist-field select:focus { border-color: rgba(138,180,255,.64); box-shadow: 0 0 0 3px rgba(138,180,255,.08); }
+.waitlist-field input::placeholder { color: #596577; }
+.waitlist-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.waitlist-form-grid .full { grid-column: 1 / -1; }
+.waitlist-consent { margin-top: 17px; display: grid; gap: 9px; }
+.waitlist-check { display: flex; gap: 10px; align-items: flex-start; color: #aeb9c8; font-size: 12px; line-height: 1.45; cursor: pointer; }
+.waitlist-check input { margin-top: 2px; accent-color: #8ab4ff; }
+.waitlist-actions { margin-top: 20px; display: flex; gap: 9px; }
+.waitlist-actions .home-button { flex: 1; }
+.waitlist-actions button.home-button { cursor: pointer; }
+.waitlist-actions button:disabled { opacity: .48; cursor: wait; transform: none; }
+.waitlist-message { min-height: 18px; margin-top: 14px; color: var(--home-faint); font-size: 11px; line-height: 1.5; }
+.waitlist-message.error { color: #ff96a4; }
+.waitlist-message.success { color: #70d9ca; }
+#waitlistRecaptcha { margin-top: 14px; min-height: 1px; overflow: hidden; }
+.waitlist-code-number { margin-top: 18px; color: var(--home-faint); font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.waitlist-success-mark {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 19px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(53,209,188,.34);
+  border-radius: 50%;
+  color: #79e2d3;
+  font-size: 20px;
+}
+.waitlist-success-detail {
+  margin-top: 22px;
+  border-top: 1px solid var(--home-line);
+  border-bottom: 1px solid var(--home-line);
+}
+.waitlist-success-detail div { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--home-line); }
+.waitlist-success-detail div:last-child { border-bottom: 0; }
+.waitlist-success-detail span { color: var(--home-faint); font-size: 11px; }
+.waitlist-success-detail strong { color: #dce5f2; font-size: 12px; text-align: right; }
+.waitlist-fineprint { margin-top: 12px !important; color: var(--home-faint) !important; font-size: 10px !important; }
+
+@media (max-width: 1040px) {
+  .home-waitlist-grid { grid-template-columns: 1fr; gap: 46px; }
+}
+
+@media (max-width: 760px) {
+  .home-nav button { padding: 13px 12px; text-align: left; }
+  .home-waitlist { padding: 82px 0 88px; }
+  .home-waitlist-actions { display: grid; }
+  .waitlist-layer { padding: 0; align-items: end; }
+  .waitlist-dialog { width: 100%; max-height: 92dvh; border-radius: 18px 18px 0 0; border-left: 0; border-right: 0; border-bottom: 0; padding-bottom: env(safe-area-inset-bottom); }
+  .waitlist-body { padding: 22px 17px 24px; }
+  .waitlist-form-grid { grid-template-columns: 1fr; }
+  .waitlist-form-grid .full { grid-column: auto; }
+  .waitlist-actions { display: grid; grid-template-columns: 1fr; }
+  .waitlist-progress span { padding: 11px 14px; }
+}
