@@ -3,203 +3,268 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#050713" />
+  <meta name="theme-color" content="#070a10" />
   <meta name="color-scheme" content="dark" />
-  <title>Traid — AI Forecast Trading Terminal</title>
-  <link rel="stylesheet" href="./app.css" />
-  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <meta name="description" content="Traid generates AI market forecasts as future candles, ranks them against market structure and context, and lets traders test predictions with historical Replay." />
+  <meta name="robots" content="index,follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Traid | AI market forecasts drawn on the chart" />
+  <meta property="og:description" content="Generate possible future candle paths, rank them against market context, and test the forecast against history." />
+  <title>Traid | AI market forecasts drawn on the chart</title>
+  <link rel="stylesheet" href="./homepage.css" />
 </head>
-<body>
-  <div class="app-shell">
-    <header class="topbar">
-      <button class="icon-button mobile-only" id="watchlistToggle" aria-label="Open watchlist">☰</button>
-      <a class="brand" href="#chart" aria-label="Traid home">
-        <span class="brand-mark">T</span>
-        <span class="brand-copy"><strong>TRAID</strong><small>AI market terminal</small></span>
-      </a>
-      <div class="market-head">
-        <span class="connection-dot" id="connectionDot"></span>
-        <span class="market-copy"><strong id="marketName">Gold / U.S. Dollar</strong><small id="providerText">Connecting…</small></span>
-        <span class="live-price" id="livePrice">—</span>
-        <span class="price-change" id="priceChange">—</span>
-      </div>
-      <div class="top-actions">
-        <span class="pill live" id="feedPill">● LIVE</span>
-        <span class="pill" id="forecastPill">FORECAST —</span>
-        <span class="pill locked" id="tradingPill">TRADING LOCKED</span>
-        <button class="icon-button" id="notificationButton" aria-label="Enable notifications">♢</button>
-        <button class="icon-button" id="settingsButton" aria-label="Open settings">⚙</button>
+<body class="home-body">
+  <div class="home-shell">
+    <header class="home-header">
+      <div class="home-wrap">
+        <a class="home-brand" href="/" aria-label="Traid home">
+          <span class="home-brand-mark">T</span>
+          <span class="home-brand-copy"><strong>TRAID</strong><small>AI market forecasting</small></span>
+        </a>
+        <nav class="home-nav" aria-label="Main navigation">
+          <a href="#how">How it works</a>
+          <a href="#replay">Replay</a>
+          <a href="#markets">Markets</a>
+          <a href="#pricing">Pricing</a>
+          <a class="home-header-cta" href="/chart">Open chart</a>
+        </nav>
+        <button class="home-menu" id="homeMenu" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
       </div>
     </header>
 
-    <aside class="watchlist panel" id="watchlistPanel">
-      <div class="panel-heading">
-        <div><span class="eyebrow">Markets</span><h2>Watchlist</h2></div>
-        <button class="icon-button mobile-only" id="watchlistClose" aria-label="Close watchlist">×</button>
-      </div>
-      <div class="watchlist-items" id="watchlistItems">
-        <button class="watch-item active" data-symbol="XAUUSD"><span><strong>XAUUSD</strong><small>Gold</small></span><span class="watch-price" data-watch-price="XAUUSD">—</span></button>
-        <button class="watch-item" data-symbol="XAGUSD"><span><strong>XAGUSD</strong><small>Silver</small></span><span class="watch-price" data-watch-price="XAGUSD">—</span></button>
-        <button class="watch-item" data-symbol="NAS100"><span><strong>NAS100</strong><small>Nasdaq 100</small></span><span class="watch-price" data-watch-price="NAS100">—</span></button>
-        <button class="watch-item" data-symbol="SPX500"><span><strong>SPX500</strong><small>S&amp;P 500</small></span><span class="watch-price" data-watch-price="SPX500">—</span></button>
-      </div>
-      <div class="sidebar-section">
-        <span class="eyebrow">Forecast health</span>
-        <div class="metric-stack">
-          <div><span>Direction accuracy</span><strong id="sidebarAccuracy">—</strong></div>
-          <div><span>Range hit rate</span><strong id="sidebarRange">—</strong></div>
-          <div><span>Samples</span><strong id="sidebarSamples">0</strong></div>
-        </div>
-      </div>
-      <div class="sidebar-section event-preview">
-        <div class="section-row"><span class="eyebrow">Next event</span><button class="text-button" data-open-tab="calendar">View all</button></div>
-        <div id="nextEvent"><strong>No event loaded</strong><small>Add a calendar source or event.</small></div>
-      </div>
-      <div class="sidebar-footer"><span id="clock">—</span><small>UTC</small></div>
-    </aside>
-
-    <main class="workspace">
-      <section class="chart-card panel" id="chartView">
-        <div class="chart-toolbar">
-          <select id="symbolSelect" class="select-control" aria-label="Symbol">
-            <option>XAUUSD</option><option>XAGUSD</option><option>NAS100</option><option>SPX500</option>
-          </select>
-          <div class="segmented scrollable" id="timeframeControls" aria-label="Timeframe">
-            <button data-timeframe="1m">1m</button><button data-timeframe="5m" class="active">5m</button>
-            <button data-timeframe="15m">15m</button><button data-timeframe="30m">30m</button>
-            <button data-timeframe="1h">1H</button><button data-timeframe="4h">4H</button><button data-timeframe="1d">1D</button>
+    <main>
+      <section class="home-hero">
+        <div class="home-wrap home-hero-grid">
+          <div class="home-hero-copy">
+            <p class="home-kicker">Market forecasting, not signal spam</p>
+            <h1>See what the model <span>sees next.</span></h1>
+            <p>Traid turns recent price action into projected future candles, then ranks those possible paths against market structure, volatility, multiple timeframes and economic context.</p>
+            <div class="home-actions">
+              <a class="home-button primary" href="/chart">Open Traid <span aria-hidden="true">↗</span></a>
+              <a class="home-button secondary" href="#replay">Watch a forecast resolve</a>
+            </div>
+            <div class="home-hero-note"><span class="home-live-dot"></span><span>Forecasts are probabilities. Traid shows the model output; you make the decision.</span></div>
           </div>
-          <div class="segmented chart-type">
-            <button data-chart-type="candles" class="active" aria-label="Candlestick chart">▥</button>
-            <button data-chart-type="line" aria-label="Line chart">⌁</button>
+
+          <div class="home-terminal-frame" aria-label="Animated example of a Traid forecast">
+            <div class="home-terminal-bar">
+              <div class="home-terminal-market">XAUUSD <span>5m</span></div>
+              <div class="home-terminal-status"><span class="home-chip live">● LIVE</span><span class="home-chip">KRONOS</span></div>
+            </div>
+            <div class="home-chart-stage">
+              <canvas id="heroChart" role="img" aria-label="Animated candlestick chart with real candles and projected future candles"></canvas>
+              <div class="home-chart-caption">ILLUSTRATIVE PRODUCT ANIMATION</div>
+            </div>
+            <div class="home-terminal-metrics">
+              <div><span>Structure</span><strong>Bullish continuation</strong></div>
+              <div><span>Volatility</span><strong>Normal regime</strong></div>
+              <div><span>Projection</span><strong>13 future candles</strong></div>
+            </div>
           </div>
-          <label class="switch-control" title="Show uncertainty and forecast-revision analytics">
-            <input id="advancedForecast" type="checkbox" />
-            <span class="switch"></span><span>Advanced</span>
-          </label>
-          <button class="ghost-button" id="refreshForecast">Refresh</button>
-        </div>
-
-        <div class="chart-status-row">
-          <div class="legend">
-            <span><i class="swatch market"></i>Market</span>
-            <span><i class="swatch active-candle"></i>Live candle</span>
-            <span><i class="swatch forecast"></i>Active forecast</span>
-            <span><i class="swatch previous"></i>Previous · 67%</span>
-            <span><i class="swatch older"></i>Older · 33%</span>
-          </div>
-          <span id="forecastStatus">Forecast pending</span>
-        </div>
-
-        <div class="chart-wrap">
-          <div id="chart"></div>
-          <div class="chart-watermark"><span>TRAID</span><small id="watermarkMarket">XAUUSD · 5m</small></div>
-          <div class="forecast-label">Kronos OHLCV projection</div>
-          <div class="stale-overlay hidden" id="staleOverlay">Market feed is stale</div>
-        </div>
-
-        <div class="advanced-strip hidden" id="advancedStrip">
-          <article><span>Revision</span><strong id="revisionSeverity">—</strong><small id="revisionDirection">Waiting for prior forecast</small></article>
-          <article><span>Path similarity</span><strong id="pathSimilarity">—</strong><small>Forecast stability</small></article>
-          <article><span>Magnitude change</span><strong id="magnitudeChange">—</strong><small id="timingShift">Timing shift —</small></article>
-          <article><span>Volatility change</span><strong id="volatilityChange">—</strong><small id="candleConsensus">Candle consensus —</small></article>
-          <article><span>Multi-timeframe</span><strong id="timeframeConsensus">—</strong><small id="timeframeAgreement">Agreement —</small></article>
         </div>
       </section>
 
-      <section class="lower-panel panel" id="analysisView">
-        <nav class="tab-bar" id="analysisTabs">
-          <button class="active" data-tab="positions">Positions</button>
-          <button data-tab="forecast">Forecast</button>
-          <button data-tab="calendar">Calendar</button>
-          <button data-tab="replay">Replay</button>
-          <button data-tab="journal">Journal</button>
-          <button data-tab="audit" class="admin-only">Audit</button>
-        </nav>
-        <div class="tab-content active" data-content="positions">
-          <div class="content-heading"><div><h3>Open exposure</h3><p id="positionSummary">Connect MT5 to view positions.</p></div><div><button class="ghost-button" id="refreshPositions">Refresh</button><button class="danger-outline admin-only" id="closeAllButton">Close all</button></div></div>
-          <div class="table-scroll"><table><thead><tr><th>Market</th><th>Side</th><th>Lots</th><th>Entry</th><th>Current</th><th>SL</th><th>TP</th><th>P/L</th><th>Trailing</th><th></th></tr></thead><tbody id="positionsBody"><tr><td colspan="10" class="empty-cell">No position data.</td></tr></tbody></table></div>
-          <div class="pending-block"><div class="content-heading compact"><h3>Pending orders</h3></div><div class="table-scroll"><table><thead><tr><th>Ticket</th><th>Market</th><th>Volume</th><th>Entry</th><th>SL</th><th>TP</th><th></th></tr></thead><tbody id="pendingBody"><tr><td colspan="7" class="empty-cell">No pending orders.</td></tr></tbody></table></div></div>
+      <section class="home-system-strip" aria-label="Traid system components">
+        <div class="home-wrap home-system-grid">
+          <div class="lead"><span>One forecasting stack</span><strong>Kronos predicts. Traid contextualizes, ranks, visualizes and evaluates.</strong></div>
+          <div><span>Model</span><strong>Kronos OHLC forecasting</strong></div>
+          <div><span>Context</span><strong>ICT / SMC + regime</strong></div>
+          <div><span>Market data</span><strong>Live MT5 feed</strong></div>
+          <div><span>Validation</span><strong>Historical Replay</strong></div>
         </div>
-        <div class="tab-content" data-content="forecast">
-          <div class="stat-grid">
-            <article><span>Directional accuracy</span><strong id="accuracyDirection">—</strong></article>
-            <article><span>Mean close error</span><strong id="accuracyError">—</strong></article>
-            <article><span>Range hit rate</span><strong id="accuracyRange">—</strong></article>
-            <article><span>Scored candles</span><strong id="accuracySamples">0</strong></article>
+      </section>
+
+      <section class="home-section" id="how">
+        <div class="home-wrap home-process">
+          <div class="home-section-rail">
+            <p class="home-kicker">How Traid works</p>
+            <h2 class="home-section-title">A forecast has to survive context.</h2>
+            <p class="home-copy">The chart is the output. Behind it, Traid separates model generation from the logic used to judge which path deserves to be shown.</p>
           </div>
-          <div class="forecast-detail-grid"><div><h3>Horizon accuracy</h3><div id="horizonAccuracy" class="list-stack"></div></div><div><h3>Cross-market context</h3><div id="crossMarketContext" class="list-stack"></div></div></div>
+          <div class="home-process-list">
+            <article class="home-process-row">
+              <span class="num">01</span><h3>Read the market</h3><p>Completed candles, the current market state and higher-timeframe structure establish the context available at prediction time.</p>
+            </article>
+            <article class="home-process-row">
+              <span class="num">02</span><h3>Generate possible futures</h3><p>Kronos samples multiple legitimate OHLC trajectories instead of reducing the future to a single up-or-down call.</p>
+            </article>
+            <article class="home-process-row">
+              <span class="num">03</span><h3>Rank the paths</h3><p>Traid checks structure, liquidity, session, volatility, multi-timeframe alignment and scheduled economic risk before selecting a representative path.</p>
+            </article>
+            <article class="home-process-row">
+              <span class="num">04</span><h3>Track what happens</h3><p>The selected forecast stays visible beside real price. Traid can score direction, close error, ATR-normalized error and how the path changes as reality arrives.</p>
+            </article>
+          </div>
         </div>
-        <div class="tab-content" data-content="calendar">
-          <div class="content-heading"><div><h3>Economic calendar</h3><p>High-impact events are chart context, not an automatic trading instruction.</p></div><button class="ghost-button admin-only" id="addEventButton">Add event</button></div>
-          <div id="calendarList" class="timeline-list"></div>
+      </section>
+
+      <section class="home-replay" id="replay">
+        <div class="home-wrap">
+          <div class="home-replay-head">
+            <div>
+              <p class="home-kicker">Replay</p>
+              <h2 class="home-section-title">Do not trust a forecast because it looks convincing.</h2>
+            </div>
+            <p class="home-copy">Pick a historical cutoff. Traid hides everything after it, runs the same forecasting stack against only the information available at that moment, then lets you reveal what actually happened candle by candle.</p>
+          </div>
+
+          <div class="replay-demo">
+            <div class="replay-demo-head">
+              <strong>NAS100 · historical replay</strong>
+              <span>Forecast locked at cutoff</span>
+              <div class="replay-progress" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+            <div class="replay-canvas-wrap">
+              <canvas id="replayChartDemo" role="img" aria-label="Animated replay showing predicted candles and actual candles being revealed"></canvas>
+            </div>
+            <div class="replay-readout">
+              <div><span>Actual candles revealed</span><strong id="replayRevealCount">00 / 11</strong></div>
+              <div><span>Revealed close error</span><strong id="demoCloseError">—</strong></div>
+              <div><span>Normalized error</span><strong id="demoAtrError">—</strong></div>
+            </div>
+          </div>
         </div>
-        <div class="tab-content" data-content="replay">
-          <div class="replay-controls"><label>Start index<input id="replayStart" type="number" value="400" min="30" /></label><label>Steps<input id="replaySteps" type="number" value="100" min="1" max="1000" /></label><label>Horizon<input id="replayHorizon" type="number" value="12" min="1" /></label><button class="primary-button" id="runReplay">Run replay</button></div>
-          <div class="stat-grid replay-stats"><article><span>Return</span><strong id="replayReturn">—</strong></article><article><span>Win rate</span><strong id="replayWinRate">—</strong></article><article><span>Max drawdown</span><strong id="replayDrawdown">—</strong></article><article><span>Trades</span><strong id="replayTrades">—</strong></article></div>
-          <div id="replayChart" class="mini-chart"></div>
+      </section>
+
+      <section class="home-section">
+        <div class="home-wrap home-evidence">
+          <div>
+            <p class="home-kicker">Measured, not marketed</p>
+            <h2 class="home-section-title">The model should have to prove itself.</h2>
+            <p class="home-copy">Traid records forecast outcomes so confidence can eventually reflect how the system actually performs by market, timeframe and regime. No invented win rate belongs on this page.</p>
+          </div>
+          <div class="home-evidence-card">
+            <h3>What Traid measures</h3>
+            <p>Performance becomes useful when it is tied to the conditions that produced it, not compressed into one flattering headline number.</p>
+            <div class="home-metric-placeholder">
+              <div><span>Directional accuracy</span><strong>BY SYMBOL + TIMEFRAME</strong></div>
+              <div><span>Close error</span><strong>% + ATR NORMALIZED</strong></div>
+              <div><span>Range / path accuracy</span><strong>FORECAST VS REALITY</strong></div>
+              <div><span>Context calibration</span><strong>REGIME + SESSION</strong></div>
+            </div>
+          </div>
         </div>
-        <div class="tab-content" data-content="journal">
-          <div class="content-heading"><div><h3>Trading journal</h3><p>Forecast, risk, execution, and outcome in one record.</p></div><button class="ghost-button trader-only" id="newJournalButton">New entry</button></div>
-          <div id="journalList" class="journal-grid"></div>
+      </section>
+
+      <section class="home-section home-rule">
+        <div class="home-wrap home-context">
+          <div>
+            <p class="home-kicker">More than a model output</p>
+            <h2 class="home-section-title">Context decides whether a prediction deserves attention.</h2>
+          </div>
+          <div class="home-context-stack">
+            <div class="home-context-item"><strong>Kronos paths</strong><p>Multiple sampled future OHLC sequences form the raw candidate set.</p></div>
+            <div class="home-context-item"><strong>Market structure</strong><p>Swings, BOS / CHoCH, liquidity, fair value gaps, order blocks and dealing-range position provide structural context.</p></div>
+            <div class="home-context-item"><strong>Multiple timeframes</strong><p>Higher-timeframe bias, setup location and lower-timeframe trigger can agree, conflict or produce no-trade conditions.</p></div>
+            <div class="home-context-item"><strong>Regime + session</strong><p>Volatility and trading-session conditions help distinguish a quiet range from an expansion environment.</p></div>
+            <div class="home-context-item"><strong>Economic events</strong><p>Scheduled high-impact events are treated as risk context rather than automatic trade instructions.</p></div>
+            <div class="home-context-item"><strong>Calibration</strong><p>Realized forecasts can teach Traid which kinds of predictions have historically held up under similar conditions.</p></div>
+          </div>
         </div>
-        <div class="tab-content" data-content="audit">
-          <div class="content-heading"><h3>Audit log</h3><button class="ghost-button" id="refreshAudit">Refresh</button></div>
-          <div id="auditList" class="audit-list"></div>
+      </section>
+
+      <section class="home-section home-markets" id="markets">
+        <div class="home-wrap">
+          <p class="home-kicker">Markets</p>
+          <h2 class="home-section-title">One forecasting interface across different price scales.</h2>
+          <p class="home-copy">Raw prices can range from roughly one dollar to thousands. Traid keeps forecast evaluation comparable by tracking percentage error and volatility-normalized ATR error.</p>
+          <div class="market-table" role="table" aria-label="Markets supported by Traid">
+            <div class="market-row" role="row"><strong>XAUUSD</strong><span>Gold / U.S. Dollar</span><small>METAL</small></div>
+            <div class="market-row" role="row"><strong>XAGUSD</strong><span>Silver / U.S. Dollar</span><small>METAL</small></div>
+            <div class="market-row" role="row"><strong>EURUSD</strong><span>Euro / U.S. Dollar</span><small>FX</small></div>
+            <div class="market-row" role="row"><strong>USDJPY</strong><span>U.S. Dollar / Japanese Yen</span><small>FX</small></div>
+            <div class="market-row" role="row"><strong>NAS100</strong><span>Nasdaq 100 CFD</span><small>INDEX</small></div>
+            <div class="market-row" role="row"><strong>SPX500</strong><span>S&amp;P 500 CFD</span><small>INDEX</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-section home-mobile-section">
+        <div class="home-wrap home-mobile-grid">
+          <div>
+            <p class="home-kicker">Phone + tablet</p>
+            <h2 class="home-section-title">The forecast terminal goes with the chart.</h2>
+            <p class="home-copy">Traid's phone and iPad layouts preserve the chart, Replay, watchlist and execution workflow without shrinking a desktop terminal until the controls become unusable.</p>
+            <div class="home-actions"><a class="home-button secondary" href="/chart">Open the responsive chart</a></div>
+          </div>
+          <div class="home-phone-wrap" aria-label="Mobile Traid interface preview">
+            <div class="home-phone">
+              <div class="home-phone-screen">
+                <div class="phone-top">EURUSD · 15m <span>● LIVE</span></div>
+                <div class="phone-chart"><canvas id="phoneChartDemo" role="img" aria-label="Mobile forecast chart animation"></canvas></div>
+                <div class="phone-readout"><span>Forecast context</span><strong>Structure aligned · normal volatility</strong></div>
+                <div class="phone-tabs"><span>Chart</span><span>Analysis</span><span>Replay</span><span>Trade</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-section home-pricing" id="pricing">
+        <div class="home-wrap">
+          <div class="pricing-intro">
+            <div>
+              <p class="home-kicker">Access</p>
+              <h2 class="home-section-title">Use it for a week. Keep it for the month.</h2>
+            </div>
+            <p class="home-copy">Simple access pricing for the full forecasting terminal. No artificial feature maze just to make a pricing table look impressive.</p>
+          </div>
+          <div class="pricing-grid">
+            <article class="price-card">
+              <span class="price-label">Weekly access</span>
+              <h3>Traid Week</h3>
+              <div class="price">$19.99 <small>/ 7 days</small></div>
+              <p>A low-commitment way to use the complete platform for a trading week.</p>
+              <ul>
+                <li>Live AI candle forecasts</li>
+                <li>All supported markets and timeframes</li>
+                <li>ICT / SMC context and calibration</li>
+                <li>Historical Replay</li>
+                <li>Mobile and iPad access</li>
+              </ul>
+              <a class="home-button secondary" href="/chart">Open chart</a>
+            </article>
+            <article class="price-card featured">
+              <span class="price-label">Monthly access</span>
+              <h3>Traid Month</h3>
+              <div class="price">$59.99 <small>/ month</small></div>
+              <p>For traders who want Traid available across the month instead of repurchasing weekly access.</p>
+              <ul>
+                <li>Everything in weekly access</li>
+                <li>Lower effective weekly cost</li>
+                <li>Persistent forecast history and calibration</li>
+                <li>Advanced forecast analytics</li>
+                <li>Future product improvements during access</li>
+              </ul>
+              <a class="home-button primary" href="/chart">Open Traid</a>
+            </article>
+          </div>
+          <p class="pricing-note">Pricing shown is the current planned access model. Forecasts are analytical tools, not guarantees of profitability.</p>
+        </div>
+      </section>
+
+      <section class="home-final">
+        <div class="home-wrap home-final-grid">
+          <div>
+            <h2>See the forecast.<br />Then test it.</h2>
+            <p>Open the same terminal shown throughout this page and inspect the model beside live price.</p>
+          </div>
+          <a class="home-button primary" href="/chart">Open the chart <span aria-hidden="true">↗</span></a>
         </div>
       </section>
     </main>
 
-    <aside class="trade-panel panel" id="tradePanel">
-      <div class="trade-handle mobile-only"></div>
-      <div class="panel-heading trade-heading"><div><span class="eyebrow">Execution</span><h2>Order ticket</h2></div><button class="icon-button mobile-only" id="tradeClose">×</button></div>
-      <div class="account-card"><div><span>Equity</span><strong id="accountEquity">—</strong></div><span class="pill" id="accountServer">Not connected</span><div class="account-mini"><span>Balance <strong id="accountBalance">—</strong></span><span>Free margin <strong id="freeMargin">—</strong></span></div></div>
-      <div class="risk-banner" id="riskBanner"><span class="risk-dot"></span><div><strong>Risk engine unavailable</strong><small>Authenticate and connect MT5.</small></div></div>
-      <div class="side-toggle"><button class="buy active" data-side="buy">Buy / Long</button><button class="sell" data-side="sell">Sell / Short</button></div>
-      <div class="order-kind segmented"><button class="active" data-order-kind="market">Market</button><button data-order-kind="limit">Limit</button><button data-order-kind="stop">Stop</button></div>
-      <form id="orderForm" class="trade-form">
-        <label class="full pending-only hidden">Entry price<input id="entryPrice" type="number" step="any" /></label>
-        <label>Size mode<select id="sizeMode"><option value="risk">Risk %</option><option value="lots">Lots</option></select></label>
-        <label id="riskPercentField">Risk %<input id="riskPercent" type="number" value="0.5" min="0.01" max="10" step="0.05" /></label>
-        <label id="lotsField" class="hidden">Lots<input id="volume" type="number" value="0.01" min="0.01" step="0.01" /></label>
-        <label>Stop distance<input id="stopDistance" type="number" value="5" min="0.00001" step="any" /></label>
-        <label>Take-profit distance<input id="takeProfit" type="number" value="10" min="0" step="any" /></label>
-        <div class="risk-preview full"><span>Calculated size <strong id="calculatedLots">—</strong></span><span>Loss at SL <strong id="estimatedLoss">—</strong></span><span>R:R <strong id="riskReward">—</strong></span></div>
-        <details class="full"><summary>Advanced protection</summary><div class="trade-form nested"><label>Trailing type<select id="trailingKind"><option value="fixed">Fixed</option><option value="percent">Percent</option><option value="atr">ATR</option><option value="candle">Candle low/high</option></select></label><label>Trail value<input id="trailDistance" type="number" value="3" min="0" step="any" /></label><label>Activation<input id="trailActivation" type="number" value="3" min="0" step="any" /></label><label>Trail step<input id="trailStep" type="number" value="0.5" min="0" step="any" /></label></div></details>
-        <label class="full notes-field">Entry reason<textarea id="entryReason" rows="2" placeholder="Why this trade? The current forecast is attached automatically."></textarea></label>
-        <label class="confirm-row full"><input id="confirmLive" type="checkbox" /> I understand live mode submits a real MT5 order.</label>
-        <button type="submit" class="primary-button buy full" id="placeOrderButton" disabled>Authenticate to trade</button>
-      </form>
-      <p class="security-note">MT5 credentials remain server-side. Forecast changes never modify or reverse a trade automatically.</p>
-    </aside>
-
-    <nav class="mobile-nav mobile-only" aria-label="Primary navigation">
-      <button class="active" data-mobile-view="chart"><span>⌁</span>Chart</button>
-      <button data-mobile-view="analysis"><span>▦</span>Analysis</button>
-      <button data-mobile-view="positions"><span>◎</span>Positions</button>
-      <button data-mobile-view="trade"><span>↗</span>Trade</button>
-      <button data-mobile-view="more"><span>•••</span>More</button>
-    </nav>
+    <footer class="home-footer">
+      <div class="home-wrap home-footer-grid">
+        <div>
+          <strong>TRAID</strong>
+          <div class="home-footer-links"><a href="/chart">Chart</a><a href="#how">How it works</a><a href="#pricing">Pricing</a></div>
+        </div>
+        <p>Traid provides market analysis and probabilistic forecasts for informational purposes. Forecasts can be wrong. Nothing on this site is financial advice or a promise of trading performance. Leveraged products can involve substantial risk.</p>
+      </div>
+    </footer>
   </div>
 
-  <aside class="drawer" id="settingsDrawer" aria-hidden="true">
-    <div class="drawer-heading"><div><span class="eyebrow">Configuration</span><h2>Terminal settings</h2></div><button class="icon-button" id="settingsClose">×</button></div>
-    <label>API URL<input id="apiUrl" value="http://localhost:8000" /></label>
-    <div class="login-card" id="loginCard"><label>Username<input id="username" autocomplete="username" value="admin" /></label><label>Password<input id="password" type="password" autocomplete="current-password" /></label><button class="primary-button" id="loginButton">Sign in</button></div>
-    <div class="session-card hidden" id="sessionCard"><div><span>Signed in</span><strong id="principalName">—</strong></div><button class="ghost-button" id="logoutButton">Sign out</button></div>
-    <label>Projected candles<input id="predLen" type="number" min="1" max="512" value="24" /></label>
-    <label>Uncertainty paths<input id="uncertaintyPaths" type="number" min="3" max="25" value="7" /></label>
-    <label class="switch-control wide"><input id="notificationsEnabled" type="checkbox" checked /><span class="switch"></span><span>Browser notifications</span></label>
-    <button class="primary-button" id="saveSettings">Save and reconnect</button>
-    <div class="drawer-note"><strong>Production note</strong><p>Use HTTPS, a private MT5 bridge, hashed passwords, restricted CORS origins, and a demo account before live mode.</p></div>
-  </aside>
-
-  <div class="modal-backdrop hidden" id="modalBackdrop"></div>
-  <div class="toast-stack" id="toastStack"></div>
-  <script type="module" src="./firebase-auth.js"></script>
-  <script src="./ict-ui-runtime.js"></script>
-  <script src="./live-first-loader.js"></script>
-  <script src="./replay-live-stack-runtime.js"></script>
-  <script src="./mobile-tablet-runtime.js"></script>
+  <script src="./homepage.js"></script>
 </body>
 </html>
