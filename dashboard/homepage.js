@@ -7,7 +7,7 @@
     const open = nav?.classList.toggle('open');
     menu.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
-  nav?.querySelectorAll('a').forEach(link => link.addEventListener('click', () => {
+  nav?.querySelectorAll('a,button').forEach(control => control.addEventListener('click', () => {
     nav.classList.remove('open');
     menu?.setAttribute('aria-expanded', 'false');
   }));
@@ -60,6 +60,18 @@
       });
     }
     return rows;
+  }
+
+  function cloneWithVerticalOffset(rows) {
+    return rows.map((row, index) => {
+      const offset = Math.sin(index * .92) * .92 + (index % 2 === 0 ? .28 : -.22);
+      return {
+        open: row.open + offset,
+        high: row.high + offset,
+        low: row.low + offset,
+        close: row.close + offset,
+      };
+    });
   }
 
   function setupCanvas(canvas) {
@@ -146,19 +158,47 @@
     ctx.restore();
   }
 
+  function clamp01(value) {
+    return Math.max(0, Math.min(1, Number(value) || 0));
+  }
+
+  function partialReplayCandle(row, progress) {
+    const p = clamp01(progress);
+    if (p >= 1) return row;
+    const bullish = row.close >= row.open;
+    const path = bullish
+      ? [row.open, row.low, row.high, row.close]
+      : [row.open, row.high, row.low, row.close];
+    const scaled = p * 3;
+    const segment = Math.min(2, Math.floor(scaled));
+    const local = scaled - segment;
+    const from = path[segment];
+    const to = path[segment + 1];
+    const current = from + (to - from) * local;
+    const visited = path.slice(0, segment + 1).concat(current);
+    return {
+      open: row.open,
+      close: current,
+      high: Math.max(...visited),
+      low: Math.min(...visited),
+    };
+  }
+
   function drawForecastChart(canvas, options = {}) {
     const { ctx, width, height } = setupCanvas(canvas);
     const history = options.history;
     const forecast = options.forecast;
     const actual = options.actual || [];
-    const reveal = Math.max(0, Math.min(actual.length, options.reveal ?? 0));
+    const completed = Math.max(0, Math.min(actual.length, options.completed ?? 0));
+    const activeIndex = Number.isInteger(options.activeIndex) ? options.activeIndex : -1;
+    const activeProgress = clamp01(options.activeProgress ?? 0);
     const pulse = options.pulse ?? 0;
     const compact = width < 520;
     const left = compact ? 12 : 20;
     const right = compact ? 12 : 22;
     const top = 22;
     const bottom = 25;
-    const rowsForScale = [...history, ...forecast, ...actual.slice(0, reveal)];
+    const rowsForScale = [...history, ...forecast, ...actual];
     const range = priceRange(rowsForScale);
     const chartHeight = height - top - bottom;
     const yFor = price => top + (range.max - price) / (range.max - range.min) * chartHeight;
@@ -191,18 +231,23 @@
       }
     });
 
+    const activeVisible = activeIndex >= 0 && activeIndex < actual.length;
     forecast.forEach((row, index) => {
       const x = left + slot * (history.length + index + .5);
-      drawCandle(ctx, x, candleWidth, row, yFor, forecastPalette, .92, false);
+      const hasResolvedClone = index < completed || (activeVisible && index === activeIndex);
+      drawCandle(ctx, x, candleWidth, row, yFor, forecastPalette, hasResolvedClone ? .22 : .92, false);
     });
 
     if (actual.length) {
-      actual.slice(0, reveal).forEach((row, index) => {
+      actual.slice(0, completed).forEach((row, index) => {
         const x = left + slot * (history.length + index + .5);
-        const predicted = forecast[index];
-        if (predicted) drawCandle(ctx, x, candleWidth + 3, predicted, yFor, forecastPalette, .17, false);
-        drawCandle(ctx, x, Math.max(2, candleWidth - 1.4), row, yFor, marketPalette, 1, false);
+        drawCandle(ctx, x, candleWidth, row, yFor, forecastPalette, .98, false);
       });
+      if (activeVisible) {
+        const row = partialReplayCandle(actual[activeIndex], activeProgress);
+        const x = left + slot * (history.length + activeIndex + .5);
+        drawCandle(ctx, x, candleWidth, row, yFor, forecastPalette, .98, false);
+      }
     }
 
     ctx.save();
@@ -239,57 +284,54 @@
   const heroForecast = continueForecast(heroHistory, 13, 88, .24);
   const replayHistory = makeCandles(31, 19214, 901, .18);
   const replayForecast = continueForecast(replayHistory, 11, 722, .34);
-  const replayActual = continueForecast(replayHistory, 11, 1019, .23).map((row, index) => {
-    const predicted = replayForecast[index];
-    const blend = .57;
-    const close = predicted.close * blend + row.close * (1 - blend);
-    const open = index === 0 ? replayHistory[replayHistory.length - 1].close : (replayForecast[index - 1].close * blend + replayActualSafe(index - 1, row.open) * (1 - blend));
-    const top = Math.max(open, close);
-    const bottom = Math.min(open, close);
-    return { open, close, high: Math.max(row.high, top + .35), low: Math.min(row.low, bottom - .35) };
-  });
-
-  function replayActualSafe(index, fallback) {
-    if (index < 0) return fallback;
-    const source = replayForecast[index];
-    return source ? source.close + Math.sin(index * .8) * .45 : fallback;
-  }
-
+  const replayActual = cloneWithVerticalOffset(replayForecast);
   const phoneHistory = makeCandles(22, 1.145, 2026, .002);
   const phoneForecast = continueForecast(phoneHistory, 8, 142, .025);
 
-  let replayReveal = reducedMotion ? replayActual.length : 0;
-  let lastRevealAt = performance.now();
+  const REPLAY_CANDLE_MS = 1080;
+  const REPLAY_START_PAUSE_MS = 650;
+  const REPLAY_END_PAUSE_MS = 2100;
+  const replayCycleMs = REPLAY_START_PAUSE_MS + replayActual.length * REPLAY_CANDLE_MS + REPLAY_END_PAUSE_MS;
+  const replayStartedAt = performance.now();
   let frame = 0;
+
+  function replayState(now) {
+    if (reducedMotion) return { completed: replayActual.length, activeIndex: -1, activeProgress: 1 };
+    const elapsed = (now - replayStartedAt) % replayCycleMs;
+    if (elapsed < REPLAY_START_PAUSE_MS) return { completed: 0, activeIndex: -1, activeProgress: 0 };
+    const candleElapsed = elapsed - REPLAY_START_PAUSE_MS;
+    const activeWindow = replayActual.length * REPLAY_CANDLE_MS;
+    if (candleElapsed >= activeWindow) return { completed: replayActual.length, activeIndex: -1, activeProgress: 1 };
+    const activeIndex = Math.floor(candleElapsed / REPLAY_CANDLE_MS);
+    const activeProgress = (candleElapsed % REPLAY_CANDLE_MS) / REPLAY_CANDLE_MS;
+    return { completed: activeIndex, activeIndex, activeProgress };
+  }
 
   function render(now) {
     const pulse = (Math.sin(now / 620) + 1) / 2;
     if (heroCanvas) drawForecastChart(heroCanvas, { history: heroHistory, forecast: heroForecast, pulse });
     if (phoneCanvas) drawForecastChart(phoneCanvas, { history: phoneHistory, forecast: phoneForecast, pulse });
 
-    if (!reducedMotion && now - lastRevealAt > 760) {
-      replayReveal += 1;
-      if (replayReveal > replayActual.length + 2) replayReveal = 0;
-      lastRevealAt = now;
-    }
-    const visibleReveal = Math.min(replayReveal, replayActual.length);
+    const replay = replayState(now);
     if (replayCanvas) drawForecastChart(replayCanvas, {
       history: replayHistory,
       forecast: replayForecast,
       actual: replayActual,
-      reveal: visibleReveal,
+      completed: replay.completed,
+      activeIndex: replay.activeIndex,
+      activeProgress: replay.activeProgress,
       pulse,
     });
 
     const revealNode = document.getElementById('replayRevealCount');
-    if (revealNode) revealNode.textContent = `${String(visibleReveal).padStart(2, '0')} / ${String(replayActual.length).padStart(2, '0')}`;
+    if (revealNode) revealNode.textContent = `${String(replay.completed).padStart(2, '0')} / ${String(replayActual.length).padStart(2, '0')}`;
     const dots = document.querySelectorAll('.replay-progress i');
-    dots.forEach((dot, index) => dot.classList.toggle('active', index < Math.ceil((visibleReveal / replayActual.length) * dots.length)));
+    dots.forEach((dot, index) => dot.classList.toggle('active', index < Math.ceil((replay.completed / replayActual.length) * dots.length)));
 
     const errNode = document.getElementById('demoCloseError');
     const atrNode = document.getElementById('demoAtrError');
-    if (visibleReveal > 0) {
-      const idx = visibleReveal - 1;
+    if (replay.completed > 0) {
+      const idx = replay.completed - 1;
       const predicted = replayForecast[idx];
       const actual = replayActual[idx];
       const raw = Math.abs(predicted.close - actual.close);
